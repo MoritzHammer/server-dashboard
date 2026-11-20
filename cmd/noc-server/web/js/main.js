@@ -365,13 +365,20 @@ document.addEventListener('click', function (e) {
 function buildPoints(arr, w, h, maxVal, padY) {
   if (!arr || arr.length < 2) return '0,' + (h - padY) + ' ' + w + ',' + (h - padY);
   var n = arr.length;
-  var cap = Math.max(maxVal, 1);
+  var cap = Math.max(maxVal, 0.001);
   return arr.map(function (v, i) {
     var x = Math.round((i / (n - 1)) * w);
     var ratio = Math.min(1, Math.max(0, v / cap));
     var y = Math.round((h - padY) - ratio * (h - padY * 2));
     return x + ',' + y;
   }).join(' ');
+}
+
+function formatMbps(mbps) {
+  if (mbps < 0.01) return (mbps * 1000).toFixed(1) + ' Kbit/s';
+  if (mbps < 1) return Math.round(mbps * 1000) + ' Kbit/s';
+  if (mbps >= 100) return Math.round(mbps) + ' Mbit/s';
+  return mbps.toFixed(1) + ' Mbit/s';
 }
 
 function renderLiveCharts(data) {
@@ -408,14 +415,15 @@ function renderLiveCharts(data) {
   if (inf.network) {
     var net = inf.network;
     if (netValEl) netValEl.textContent = '↓ ' + net.inbound_str + ' · ↑ ' + net.outbound_str;
-    if (netTotEl) netTotEl.textContent = 'Gesamt RX ' + (net.rx_total_gb || 0).toFixed(2) + ' GB · TX ' + (net.tx_total_gb || 0).toFixed(2) + ' GB';
+    if (netTotEl) netTotEl.textContent = 'NIC ' + (net.interface || 'eth0') + ' · RX ' + (net.rx_total_gb || 0).toFixed(2) + ' GB · TX ' + (net.tx_total_gb || 0).toFixed(2) + ' GB';
     var allNet = (net.in_history || []).concat(net.out_history || []);
-    var peak = allNet.reduce(function (m, x) { return Math.max(m, x); }, 0.5);
-    if (netPeakEl) netPeakEl.textContent = 'Peak: ' + peak.toFixed(1) + ' Mbit/s';
+    var rawPeak = allNet.reduce(function (m, x) { return Math.max(m, x); }, 0);
+    var chartCap = Math.max(rawPeak * 1.2, 0.01);
+    if (netPeakEl) netPeakEl.textContent = 'Peak: ' + formatMbps(rawPeak);
     var nIn = document.getElementById('chart-net-in');
     var nOut = document.getElementById('chart-net-out');
-    if (nIn) nIn.setAttribute('points', buildPoints(net.in_history || [0, 0], 360, 110, peak * 1.15, 6));
-    if (nOut) nOut.setAttribute('points', buildPoints(net.out_history || [0, 0], 360, 110, peak * 1.15, 6));
+    if (nIn) nIn.setAttribute('points', buildPoints(net.in_history || [0, 0], 360, 110, chartCap, 6));
+    if (nOut) nOut.setAttribute('points', buildPoints(net.out_history || [0, 0], 360, 110, chartCap, 6));
   }
 }
 
@@ -700,36 +708,23 @@ function renderPayload(data) {
     });
   }
 
-  // Zeile 2: Kritische Dienste (Binary Green/Red + Expandable!)
+  // Zeile 2: Kritische Dienste (Reine binäre Statusmatrix — nicht anklickbar)
   var matrixEl = document.getElementById('services-matrix');
   if (matrixEl && Array.isArray(data.critical_services)) {
     var cols = Math.min(Math.max(data.critical_services.length, 3), 6);
     matrixEl.style.setProperty('--svc-cols', String(cols));
     matrixEl.innerHTML = data.critical_services.map(function (svc) {
-      var cid = 'svc-' + svc.id;
-      var openCls = state.expandedCards.has(cid) ? ' is-open' : '';
       var offCls = svc.online ? '' : ' is-offline';
       var badge = svc.online ? '✅ ONLINE' : '🚨 OFFLINE';
-      var isHttp = svc.target && (svc.target.indexOf('http://') === 0 || svc.target.indexOf('https://') === 0);
       return (
-        '<article class="svc-tile is-expandable' + offCls + openCls + '" data-card-id="' + esc(cid) + '">' +
+        '<article class="svc-tile' + offCls + '">' +
           '<div class="svc-head">' +
             '<h3 class="svc-name">' + esc(svc.name) + '</h3>' +
-            '<div class="card-head-right">' +
-              '<span class="svc-badge">' + badge + '</span>' +
-              '<span class="chevron">▾</span>' +
-            '</div>' +
+            '<span class="svc-badge">' + badge + '</span>' +
           '</div>' +
           '<div class="svc-foot">' +
             '<span>' + esc(svc.category) + '</span>' +
             '<span class="svc-latency">' + esc(svc.latency) + '</span>' +
-          '</div>' +
-          '<div class="card-drawer">' +
-            '<div class="drawer-line"><span>Ziel</span><code>' + esc(svc.target || 'n/a') + '</code></div>' +
-            (svc.http_code ? ('<div class="drawer-line"><span>HTTP Status</span><span>' + esc(svc.http_code) + '</span></div>') : '') +
-            (svc.container_status ? ('<div class="drawer-line"><span>Container</span><span>' + esc(svc.container_status) + '</span></div>') : '') +
-            (svc.error ? ('<div class="drawer-line"><span>Fehler</span><strong>' + esc(svc.error) + '</strong></div>') : '') +
-            (isHttp ? ('<div class="drawer-actions"><a class="win-btn" href="' + esc(svc.target) + '" target="_blank" rel="noopener">Dienst öffnen ↗</a></div>') : '') +
           '</div>' +
         '</article>'
       );
@@ -774,9 +769,9 @@ function renderPayload(data) {
       if (inEl) inEl.textContent = net.inbound_str;
       if (outEl) outEl.textContent = net.outbound_str;
       var allRates = (net.in_history || []).concat(net.out_history || []);
-      var maxRate = allRates.reduce(function (m, x) { return Math.max(m, x); }, 1);
-      if (spIn) spIn.setAttribute('points', buildPoints((net.in_history || []).slice(-18), 240, 26, maxRate, 3));
-      if (spOut) spOut.setAttribute('points', buildPoints((net.out_history || []).slice(-18), 240, 26, maxRate, 3));
+      var maxRate = allRates.reduce(function (m, x) { return Math.max(m, x); }, 0.01);
+      if (spIn) spIn.setAttribute('points', buildPoints((net.in_history || []).slice(-18), 240, 26, maxRate * 1.15, 3));
+      if (spOut) spOut.setAttribute('points', buildPoints((net.out_history || []).slice(-18), 240, 26, maxRate * 1.15, 3));
       if (netDrw) {
         netDrw.innerHTML =
           '<div class="drawer-line"><span>Interface</span><code>' + esc(net.interface || 'eth0') + '</code></div>' +

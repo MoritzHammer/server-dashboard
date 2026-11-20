@@ -464,8 +464,15 @@ func NewSystemSampler(procDir, rootfs, netIface string) *SystemSampler {
 
 func (s *SystemSampler) Start(ctx context.Context) {
 	s.sampleOnce()
-	ticker := time.NewTicker(2 * time.Second)
 	go func() {
+		// Fast warmup sample so first /api/status already has live CPU & network deltas
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+			s.sampleOnce()
+		}
+		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -511,15 +518,38 @@ func (s *SystemSampler) readCPU() (cpuSample, error) {
 	return cpuSample{}, fmt.Errorf("cpu line not found")
 }
 
-func (s *SystemSampler) readNet() (netSample, error) {
-	f, err := os.Open(filepath.Join(s.procDir, "net/dev"))
+type ifaceStat struct {
+	name string
+	rx   uint64
+	tx   uint64
+}
+
+func isVirtualIface(iface string) bool {
+	return iface == "lo" ||
+		strings.HasPrefix(iface, "docker") ||
+		strings.HasPrefix(iface, "br-") ||
+		strings.HasPrefix(iface, "veth") ||
+		strings.HasPrefix(iface, "virbr") ||
+		strings.HasPrefix(iface, "vmbr") ||
+		strings.HasPrefix(iface, "cni") ||
+		strings.HasPrefix(iface, "flannel") ||
+		strings.HasPrefix(iface, "cali") ||
+		strings.HasPrefix(iface, "tun") ||
+		strings.HasPrefix(iface, "tap") ||
+		strings.HasPrefix(iface, "wg") ||
+		strings.HasPrefix(iface, "tailscale") ||
+		strings.HasPrefix(iface, "zt") ||
+		strings.HasPrefix(iface, "dummy")
+}
+
+func parseProcNetDev(path string) ([]ifaceStat, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return netSample{}, err
+		return nil, err
 	}
 	defer f.Close()
+	var stats []ifaceStat
 	sc := bufio.NewScanner(f)
-	var rxSum, txSum uint64
-	var picked []string
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if !strings.Contains(line, ":") {
@@ -527,38 +557,111 @@ func (s *SystemSampler) readNet() (netSample, error) {
 		}
 		parts := strings.SplitN(line, ":", 2)
 		iface := strings.TrimSpace(parts[0])
-		if s.netIface != "" {
-			if iface != s.netIface {
-				continue
-			}
-		} else {
-			if iface == "lo" ||
-				strings.HasPrefix(iface, "docker") ||
-				strings.HasPrefix(iface, "br-") ||
-				strings.HasPrefix(iface, "veth") ||
-				strings.HasPrefix(iface, "virbr") ||
-				strings.HasPrefix(iface, "cni") ||
-				strings.HasPrefix(iface, "flannel") {
-				continue
-			}
-		}
 		fields := strings.Fields(parts[1])
 		if len(fields) < 10 {
 			continue
 		}
 		rx, _ := strconv.ParseUint(fields[0], 10, 64)
 		tx, _ := strconv.ParseUint(fields[8], 10, 64)
-		rxSum += rx
-		txSum += tx
-		picked = append(picked, iface)
+		stats = append(stats, ifaceStat{name: iface, rx: rx, tx: tx})
 	}
-	label := "eth0"
-	if len(picked) == 1 {
-		label = picked[0]
-	} else if len(picked) > 1 {
-		label = strings.Join(picked[:minInt(2, len(picked))], "+")
+	return stats, nil
+}
+
+func parseSysClassNet(baseDir string) ([]ifaceStat, error) {
+	entries, err := os.ReadDir(baseDir)
+	if err != nil {
+		return nil, err
 	}
-	return netSample{rxBytes: rxSum, txBytes: txSum, at: time.Now(), iface: label}, nil
+	var stats []ifaceStat
+	for _, e := range entries {
+		name := e.Name()
+		rxB, err1 := os.ReadFile(filepath.Join(baseDir, name, "statistics/rx_bytes"))
+		txB, err2 := os.ReadFile(filepath.Join(baseDir, name, "statistics/tx_bytes"))
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		rx, _ := strconv.ParseUint(strings.TrimSpace(string(rxB)), 10, 64)
+		tx, _ := strconv.ParseUint(strings.TrimSpace(string(txB)), 10, 64)
+		stats = append(stats, ifaceStat{name: name, rx: rx, tx: tx})
+	}
+	return stats, nil
+}
+
+func (s *SystemSampler) pickNetSample(all []ifaceStat) (netSample, bool) {
+	var selected []ifaceStat
+	for _, st := range all {
+		if s.netIface != "" {
+			if st.name == s.netIface {
+				selected = append(selected, st)
+			}
+			continue
+		}
+		if isVirtualIface(st.name) {
+			continue
+		}
+		selected = append(selected, st)
+	}
+	// Fallback: if all non-lo interfaces were bridges (e.g. vmbr0-only host), include non-lo with traffic
+	if len(selected) == 0 && s.netIface == "" {
+		for _, st := range all {
+			if st.name != "lo" && (st.rx > 0 || st.tx > 0) {
+				selected = append(selected, st)
+			}
+		}
+	}
+	if len(selected) == 0 {
+		return netSample{}, false
+	}
+
+	sort.Slice(selected, func(i, j int) bool {
+		return (selected[i].rx + selected[i].tx) > (selected[j].rx + selected[j].tx)
+	})
+
+	var rxSum, txSum uint64
+	var activeNames []string
+	for _, st := range selected {
+		rxSum += st.rx
+		txSum += st.tx
+		if st.rx > 0 || st.tx > 0 {
+			activeNames = append(activeNames, st.name)
+		}
+	}
+	if len(activeNames) == 0 {
+		activeNames = append(activeNames, selected[0].name)
+	}
+	label := activeNames[0]
+	if len(activeNames) > 1 {
+		label = strings.Join(activeNames[:minInt(2, len(activeNames))], "+")
+	}
+	return netSample{rxBytes: rxSum, txBytes: txSum, at: time.Now(), iface: label}, true
+}
+
+func (s *SystemSampler) readNet() (netSample, error) {
+	// 1. Prefer host PID 1's net namespace (/host/proc/1/net/dev):
+	//    /host/proc/net is a symlink to self/net, which inside Docker only sees the container's bridge NIC!
+	if s.procDir != "/proc" {
+		if stats, err := parseProcNetDev(filepath.Join(s.procDir, "1/net/dev")); err == nil {
+			if ns, ok := s.pickNetSample(stats); ok {
+				return ns, nil
+			}
+		}
+	}
+	// 2. Secondary host source: /host/sys/class/net (if bind-mounted)
+	if stats, err := parseSysClassNet("/host/sys/class/net"); err == nil {
+		if ns, ok := s.pickNetSample(stats); ok {
+			return ns, nil
+		}
+	}
+	// 3. Local fallback (/proc/net/dev)
+	stats, err := parseProcNetDev(filepath.Join(s.procDir, "net/dev"))
+	if err != nil {
+		return netSample{}, err
+	}
+	if ns, ok := s.pickNetSample(stats); ok {
+		return ns, nil
+	}
+	return netSample{at: time.Now(), iface: "eth0"}, nil
 }
 
 func (s *SystemSampler) sampleOnce() {
@@ -597,8 +700,9 @@ func (s *SystemSampler) sampleOnce() {
 			if secs > 0.2 && nNow.rxBytes >= s.prevNet.rxBytes && nNow.txBytes >= s.prevNet.txBytes {
 				inMbps := float64(nNow.rxBytes-s.prevNet.rxBytes) * 8.0 / secs / 1_000_000.0
 				outMbps := float64(nNow.txBytes-s.prevNet.txBytes) * 8.0 / secs / 1_000_000.0
-				s.inMbps = math.Round(inMbps*100) / 100
-				s.outMbps = math.Round(outMbps*100) / 100
+				// Keep 0.1 Kbit/s resolution so low-traffic homelabs never snap to 0
+				s.inMbps = math.Round(inMbps*10000) / 10000
+				s.outMbps = math.Round(outMbps*10000) / 10000
 				s.inHist = appendRing(s.inHist, s.inMbps, 60)
 				s.outHist = appendRing(s.outHist, s.outMbps, 60)
 			}
@@ -780,6 +884,9 @@ func readHostName(procDir string) string {
 }
 
 func formatRate(mbps float64) string {
+	if mbps < 0.01 {
+		return fmt.Sprintf("%.1f Kbit/s", mbps*1000.0)
+	}
 	if mbps < 1.0 {
 		return fmt.Sprintf("%.0f Kbit/s", mbps*1000.0)
 	}
@@ -1795,7 +1902,7 @@ func (lc *LiveCollector) Start(ctx context.Context) {
 	ticker := time.NewTicker(lc.cfg.PollInterval)
 	go func() {
 		defer ticker.Stop()
-		time.Sleep(350 * time.Millisecond)
+		time.Sleep(700 * time.Millisecond)
 		lc.refresh()
 		for {
 			select {
@@ -1817,6 +1924,27 @@ func (lc *LiveCollector) Latest() DashboardPayload {
 		lc.mu.RLock()
 		p = lc.latest
 		lc.mu.RUnlock()
+	}
+	// Overlay freshest 2-second in-memory host CPU/RAM/Network telemetry on every poll
+	sys := lc.sampler.Snapshot()
+	p.Timestamp = time.Now().Format(time.RFC3339)
+	p.UptimeHuman = sys.uptimeStr
+	p.Infrastructure.Network = sys.net
+	p.Infrastructure.CPUHistory = sys.cpuHistory
+	p.Infrastructure.RAMHistory = sys.ramHistory
+	if len(p.Infrastructure.Gauges) >= 2 {
+		gauges := append([]GaugeStatus(nil), p.Infrastructure.Gauges...)
+		cpuSt, cpuTag := thresholdState(sys.cpuPct, 70, 85)
+		gauges[0].Value = sys.cpuPct
+		gauges[0].Status = cpuSt
+		gauges[0].StateTag = cpuTag
+		gauges[0].Detail = fmt.Sprintf("%d vCPU · Load %s", sys.cores, sys.load1)
+		ramSt, ramTag := thresholdState(sys.mem.pct, 75, 90)
+		gauges[1].Value = sys.mem.pct
+		gauges[1].Status = ramSt
+		gauges[1].StateTag = ramTag
+		gauges[1].Detail = fmt.Sprintf("%.1f / %.1f GB belegt", sys.mem.usedGB, sys.mem.totalGB)
+		p.Infrastructure.Gauges = gauges
 	}
 	return p
 }

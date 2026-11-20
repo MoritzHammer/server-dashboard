@@ -9,6 +9,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /proc:/host/proc:ro
+      - /sys/class/net:/host/sys/class/net:ro
     environment:
       - TZ=Europe/Berlin
       - HOST_IP=${HOST_IP:-192.168.178.90}
