@@ -1,5 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 136">
-  <circle cx="70" cy="44" r="40" fill="#F4B41A"/>
-  <circle cx="45" cy="87" r="40" fill="#08B4C4" opacity="0.88"/>
-  <circle cx="95" cy="87" r="40" fill="#E2366E" opacity="0.88"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 140">
+  <g style="isolation:isolate">
+    <circle cx="70" cy="46" r="42" fill="#F4B41A" style="mix-blend-mode:multiply"/>
+    <circle cx="45" cy="89" r="42" fill="#08B4C4" style="mix-blend-mode:multiply"/>
+    <circle cx="95" cy="89" r="42" fill="#E2366E" style="mix-blend-mode:multiply"/>
+  </g>
 </svg>

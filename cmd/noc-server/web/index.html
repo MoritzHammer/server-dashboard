@@ -6,6 +6,9 @@
   <title>MORITZ HAMMER · Live NOC Server Dashboard</title>
   <meta name="description" content="Live Homelab Network Operations Center (NOC) für 192.168.178.90 — Docker Engine, Host-Telemetrie, Beszel, Uptime Kuma &amp; WUD." />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
   <link rel="preload" href="/fonts/big-shoulders-display-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preload" href="/fonts/instrument-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preload" href="/fonts/instrument-serif-italic-latin.woff2" as="font" type="font/woff2" crossorigin />
@@ -424,7 +427,7 @@
             <div class="quick-top"><span class="quick-name">Uptime Kuma</span><span class="quick-port">:3001 ↗</span></div>
             <span class="quick-tag">Status &amp; Monitoring</span>
           </a>
-          <a class="quick-card" href="http://192.168.178.90:8099/system/n9qil9mgcw9fhwm" target="_blank" rel="noopener">
+          <a class="quick-card" href="http://192.168.178.90:8099" target="_blank" rel="noopener">
             <div class="quick-top"><span class="quick-name">Beszel</span><span class="quick-port">:8099 ↗</span></div>
             <span class="quick-tag">Host-Metriken</span>
           </a>
@@ -476,18 +479,18 @@
               <div class="embed-win-title">
                 <span class="win-dot" id="dot-beszel"></span>
                 <strong>Beszel</strong>
-                <span class="win-url" id="url-label-beszel">http://192.168.178.90:8099/system/n9qil9mgcw9fhwm</span>
+                <span class="win-url" id="url-label-beszel">http://192.168.178.90:8099</span>
               </div>
               <div class="embed-win-actions">
                 <button type="button" class="win-btn" id="reload-beszel" title="Beszel neu laden">↻</button>
-                <a href="http://192.168.178.90:8099/system/n9qil9mgcw9fhwm" target="_blank" rel="noopener" class="win-btn" id="open-beszel">↗ Tab</a>
+                <a href="http://192.168.178.90:8099" target="_blank" rel="noopener" class="win-btn" id="open-beszel">↗ Tab</a>
               </div>
             </div>
             <div class="embed-frame-wrap">
               <iframe id="iframe-beszel" src="about:blank" title="Beszel Live-Monitoring"></iframe>
             </div>
             <div class="embed-hint" id="hint-beszel">
-              Same-Origin-Proxy aktiv (<code>/system/n9qil9mgcw9fhwm</code> → <code>:8099</code>) — entfernt <code>X-Frame-Options</code> automatisch.
+              Same-Origin-Proxy aktiv (<code>/beszel</code> → <code>http://192.168.178.90:8099</code>) — entfernt <code>X-Frame-Options</code> automatisch.
             </div>
           </article>
 

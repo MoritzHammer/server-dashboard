@@ -21,8 +21,8 @@ var state = {
   countdown: 5,
   expandedCards: new Set(),
   lastPayload: null,
-  beszelDirectURL: 'http://192.168.178.90:8099/system/n9qil9mgcw9fhwm',
-  beszelFrameURL:  '/system/n9qil9mgcw9fhwm',
+  beszelDirectURL: 'http://192.168.178.90:8099',
+  beszelFrameURL:  '/beszel',
   kumaDirectURL:   'http://192.168.178.90:3001/status/overview',
   kumaFrameURL:    '/status/overview',
   proxyAvailable:  false,
@@ -943,7 +943,7 @@ function renderPayload(data) {
       ]
     },
     embeds: {
-      beszel_url: 'http://192.168.178.90:8099/system/n9qil9mgcw9fhwm', beszel_online: true,
+      beszel_url: 'http://192.168.178.90:8099', beszel_online: true,
       kuma_url: 'http://192.168.178.90:3001/status/overview', kuma_online: true
     },
     incidents: [

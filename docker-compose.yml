@@ -24,9 +24,9 @@ services:
       - UPTIME_KUMA_STATUS_SLUG=${UPTIME_KUMA_STATUS_SLUG:-overview}
       - UPTIME_KUMA_EMBED_URL=${UPTIME_KUMA_EMBED_URL:-http://192.168.178.90:3001/status/overview}
       - UPTIME_KUMA_API_KEY=${UPTIME_KUMA_API_KEY:-}
-      # Beszel (Live-Systemseite Port 8099 + Same-Origin Proxy + optional PocketBase API)
+      # Beszel (Live-Startseite Port 8099 + Same-Origin Proxy + optional PocketBase API)
       - BESZEL_URL=${BESZEL_URL:-http://192.168.178.90:8099}
-      - BESZEL_EMBED_URL=${BESZEL_EMBED_URL:-http://192.168.178.90:8099/system/n9qil9mgcw9fhwm}
+      - BESZEL_EMBED_URL=${BESZEL_EMBED_URL:-http://192.168.178.90:8099}
       - BESZEL_EMAIL=${BESZEL_EMAIL:-}
       - BESZEL_PASSWORD=${BESZEL_PASSWORD:-}
       # Integrierter Same-Origin-Proxy entfernt X-Frame-Options/CSP automatisch für Beszel & Kuma

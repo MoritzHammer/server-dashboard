@@ -366,7 +366,7 @@ func loadConfig() Config {
 	}
 
 	beszelURL := strings.TrimRight(envOr("BESZEL_URL", fmt.Sprintf("http://%s:8099", hostIP)), "/")
-	beszelEmbed := strings.TrimRight(envOr("BESZEL_EMBED_URL", fmt.Sprintf("%s/system/n9qil9mgcw9fhwm", beszelURL)), "/")
+	beszelEmbed := strings.TrimRight(envOr("BESZEL_EMBED_URL", beszelURL), "/")
 	proxyRaw := strings.ToLower(envOr("ENABLE_EMBED_PROXY", "true"))
 	enableProxy := proxyRaw != "false" && proxyRaw != "0" && proxyRaw != "no"
 	wudURL := strings.TrimRight(envOr("WUD_URL", ""), "/")
@@ -1955,9 +1955,9 @@ func (lc *LiveCollector) seedInitial() {
 		Kuma:            KumaPublicSnapshot{Monitors: []KumaPublicMonitor{}},
 		Embeds: EmbedConfig{
 			BeszelURL:      lc.cfg.BeszelEmbed,
-			BeszelFrameURL: computeFrameURL(lc.cfg.BeszelEmbed, lc.cfg.EnableEmbedProxy),
+			BeszelFrameURL: computeFrameURL(lc.cfg.BeszelEmbed, lc.cfg.EnableEmbedProxy, "/beszel"),
 			KumaURL:        lc.cfg.UptimeKumaEmbed,
-			KumaFrameURL:   computeFrameURL(lc.cfg.UptimeKumaEmbed, lc.cfg.EnableEmbedProxy),
+			KumaFrameURL:   computeFrameURL(lc.cfg.UptimeKumaEmbed, lc.cfg.EnableEmbedProxy, ""),
 			ProxyEnabled:   lc.cfg.EnableEmbedProxy,
 			DozzleURL:      lc.cfg.DozzleURL,
 		},
@@ -2554,10 +2554,10 @@ func (lc *LiveCollector) refresh() {
 		Kuma:       kumaPub,
 		Embeds: EmbedConfig{
 			BeszelURL:      beszelEmbed,
-			BeszelFrameURL: computeFrameURL(beszelEmbed, lc.cfg.EnableEmbedProxy),
+			BeszelFrameURL: computeFrameURL(beszelEmbed, lc.cfg.EnableEmbedProxy, "/beszel"),
 			BeszelOnline:   beszelSnap.Reachable,
 			KumaURL:        lc.cfg.UptimeKumaEmbed,
-			KumaFrameURL:   computeFrameURL(lc.cfg.UptimeKumaEmbed, lc.cfg.EnableEmbedProxy),
+			KumaFrameURL:   computeFrameURL(lc.cfg.UptimeKumaEmbed, lc.cfg.EnableEmbedProxy, ""),
 			KumaOnline:     kumaSnap.Reachable,
 			ProxyEnabled:   lc.cfg.EnableEmbedProxy,
 			WUDURL:         wudURL,
@@ -2572,12 +2572,21 @@ func (lc *LiveCollector) refresh() {
 	lc.mu.Unlock()
 }
 
-func computeFrameURL(directURL string, proxyEnabled bool) string {
+func computeFrameURL(directURL string, proxyEnabled bool, rootAlias string) string {
 	if !proxyEnabled || directURL == "" {
 		return directURL
 	}
 	u, err := url.Parse(directURL)
-	if err != nil || u.Path == "" || u.Path == "/" {
+	if err != nil {
+		return directURL
+	}
+	if u.Path == "" || u.Path == "/" {
+		if rootAlias != "" {
+			if u.RawQuery != "" {
+				return rootAlias + "?" + u.RawQuery
+			}
+			return rootAlias
+		}
 		return directURL
 	}
 	p := u.Path
@@ -2643,6 +2652,24 @@ func maxInt(a, b int) int {
 // Strips X-Frame-Options & CSP frame-ancestors so Beszel (:8099) & Kuma (:3001)
 // render cleanly inside the dashboard tabs without browser cross-origin blocks.
 
+type embedCtxKey int
+
+const ctxKeyRootAlias embedCtxKey = 1
+
+func injectRootPathRewrite(html []byte) []byte {
+	snippet := []byte(`<script>try{history.replaceState(null,"","/")}catch(e){}</script>`)
+	lower := bytes.ToLower(html)
+	if idx := bytes.Index(lower, []byte("<head>")); idx != -1 {
+		pos := idx + len("<head>")
+		out := make([]byte, 0, len(html)+len(snippet))
+		out = append(out, html[:pos]...)
+		out = append(out, snippet...)
+		out = append(out, html[pos:]...)
+		return out
+	}
+	return append(snippet, html...)
+}
+
 func newEmbedProxy(name, rawTarget string) (*httputil.ReverseProxy, *url.URL) {
 	if rawTarget == "" {
 		return nil, nil
@@ -2668,6 +2695,11 @@ func newEmbedProxy(name, rawTarget string) (*httputil.ReverseProxy, *url.URL) {
 		Transport:     transport,
 		FlushInterval: -1, // Instant flush for PocketBase SSE (/api/realtime) & Socket.IO
 		Director: func(req *http.Request) {
+			if req.Context().Value(ctxKeyRootAlias) == true {
+				req.URL.Path = "/"
+				req.URL.RawPath = ""
+				req.Header.Del("Accept-Encoding") // Request plain HTML so we can inject history.replaceState
+			}
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
 			req.Host = target.Host
@@ -2690,6 +2722,19 @@ func newEmbedProxy(name, rawTarget string) (*httputil.ReverseProxy, *url.URL) {
 				rel := strings.TrimPrefix(loc, originStr)
 				if rel != "" && rel != "/" {
 					resp.Header.Set("Location", rel)
+				}
+			}
+			if resp.Request != nil && resp.Request.Context().Value(ctxKeyRootAlias) == true &&
+				strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") &&
+				resp.Header.Get("Content-Encoding") == "" {
+				body, err := io.ReadAll(io.LimitReader(resp.Body, 4*1024*1024))
+				resp.Body.Close()
+				if err == nil {
+					body = injectRootPathRewrite(body)
+					resp.Body = io.NopCloser(bytes.NewReader(body))
+					resp.ContentLength = int64(len(body))
+					resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+					resp.Header.Del("Transfer-Encoding")
 				}
 			}
 			return nil
@@ -2742,8 +2787,7 @@ func isKumaPath(p string) bool {
 		strings.HasPrefix(p, "/api/entry-page") ||
 		strings.HasPrefix(p, "/upload/") ||
 		strings.HasPrefix(p, "/socket.io/") ||
-		p == "/icon.svg" ||
-		p == "/apple-touch-icon.png"
+		p == "/icon.svg"
 }
 
 func isBeszelPath(p string) bool {
@@ -2846,6 +2890,11 @@ func main() {
 
 		// 3. Same-origin embed reverse proxy for Uptime Kuma & Beszel
 		if cfg.EnableEmbedProxy {
+			if (p == "/beszel" || p == "/beszel/") && beszelProxy != nil {
+				ctx := context.WithValue(r.Context(), ctxKeyRootAlias, true)
+				beszelProxy.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
 			if isKumaPath(p) && kumaProxy != nil {
 				kumaProxy.ServeHTTP(w, r)
 				return
