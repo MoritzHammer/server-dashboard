@@ -1890,10 +1890,80 @@ type LiveCollector struct {
 }
 
 func NewLiveCollector(cfg Config) *LiveCollector {
-	return &LiveCollector{
+	lc := &LiveCollector{
 		cfg:     cfg,
 		sampler: NewSystemSampler(cfg.ProcDir, cfg.RootFSPath, cfg.NetInterface),
 		beszel:  &BeszelClient{},
+	}
+	lc.seedInitial()
+	return lc
+}
+
+func (lc *LiveCollector) seedInitial() {
+	sys := lc.sampler.Snapshot()
+	svcs := make([]ServiceStatus, 0, len(lc.cfg.CriticalServices))
+	for _, sd := range lc.cfg.CriticalServices {
+		svcs = append(svcs, ServiceStatus{
+			ID:       slugify(sd.Name),
+			Name:     sd.Name,
+			Category: sd.Category,
+			Target:   sd.Target,
+			Online:   true,
+			Latency:  "prüfe…",
+		})
+	}
+	diskDetailStr := fmt.Sprintf("%.0f / %.0f GB", sys.disk.usedGB, sys.disk.totalGB)
+	if sys.disk.totalGB >= 1000 {
+		diskDetailStr = fmt.Sprintf("%.0f GB / %.2f TB", sys.disk.usedGB, sys.disk.totalGB/1024.0)
+	}
+	cpuSt, cpuTag := thresholdState(sys.cpuPct, 70, 85)
+	ramSt, ramTag := thresholdState(sys.mem.pct, 75, 90)
+	diskSt, diskTag := thresholdState(sys.disk.pct, 80, 90)
+
+	lc.latest = DashboardPayload{
+		Mode:            "live",
+		Timestamp:       time.Now().Format(time.RFC3339),
+		PollIntervalSec: int(lc.cfg.PollInterval.Seconds()),
+		Hostname:        nonEmpty(sys.hostName, lc.cfg.HostIP),
+		HostIP:          lc.cfg.HostIP,
+		UptimeHuman:     sys.uptimeStr,
+		Sources:         []string{"Host /proc"},
+		Verdict:         VerdictInfo{Level: "ok", Text: "LIVE-SYNC LÄUFT · PRÜFE DIENSTE…"},
+		ExecutiveSummary: []ExecStat{
+			{ID: "services-online", Label: "Dienste online", Value: fmt.Sprintf("%d / %d", len(svcs), len(svcs)), Source: "Live-Probe", Status: "ok", Sub: "Prüfe Dienste…", Details: []string{"Erster Live-Check läuft…"}},
+			{ID: "hosts-online", Label: "Hosts online", Value: "1 / 1", Source: "Host-Check", Status: "ok", Sub: fmt.Sprintf("%s · Uptime %s", nonEmpty(sys.hostName, lc.cfg.HostIP), sys.uptimeStr), Details: []string{"Host erreichbar"}},
+			{ID: "containers-healthy", Label: "Container healthy", Value: "– / –", Source: "Docker", Status: "ok", Sub: "Lese Docker Engine…", Details: []string{"Initialisiere Docker Socket…"}},
+			{ID: "ssl-status", Label: "SSL-Zertifikate", Value: "OK", Source: "Live TLS", Status: "ok", Sub: "Prüfe Zertifikate…", Details: []string{"TLS-Check läuft…"}},
+		},
+		CriticalServices: svcs,
+		Infrastructure: InfraStatus{
+			Source:     fmt.Sprintf("Live /proc · Host %s", nonEmpty(sys.hostName, lc.cfg.HostIP)),
+			CPUHistory: sys.cpuHistory,
+			RAMHistory: sys.ramHistory,
+			Gauges: []GaugeStatus{
+				{ID: "cpu", Label: "CPU-Last", Value: sys.cpuPct, Unit: "%", Status: cpuSt, StateTag: cpuTag, Detail: fmt.Sprintf("%d vCPU · Load %s", sys.cores, sys.load1), Threshold: "Grün < 70 % · Gelb 70–85 % · Rot > 85 %", Extra: []string{fmt.Sprintf("Load 1m / 5m / 15m: %s · %s · %s", sys.load1, sys.load5, sys.load15)}},
+				{ID: "ram", Label: "Arbeitsspeicher", Value: sys.mem.pct, Unit: "%", Status: ramSt, StateTag: ramTag, Detail: fmt.Sprintf("%.1f / %.1f GB belegt", sys.mem.usedGB, sys.mem.totalGB), Threshold: "Grün < 75 % · Gelb 75–90 % · Rot > 90 %", Extra: []string{fmt.Sprintf("Verfügbar: %.1f GB · Cache: %.1f GB", sys.mem.availGB, sys.mem.cachedGB)}},
+				{ID: "disk", Label: "Datenträger", Value: sys.disk.pct, Unit: "%", Status: diskSt, StateTag: diskTag, Detail: diskDetailStr, Threshold: "Grün < 80 % · Gelb 80–90 % · Rot > 90 %", Extra: []string{fmt.Sprintf("Frei: %.1f GB · Mount: %s", sys.disk.freeGB, sys.disk.mount)}},
+			},
+			Network: sys.net,
+		},
+		ContainerHealth: ContainerHealth{Available: false, Source: "Docker Engine", TopRestarts: []RestartEntry{}},
+		Containers:      []DockerContainerInfo{},
+		SSLCerts:        []SSLCheckResult{},
+		WUD:             WUDSnapshot{Updates: []WUDUpdateItem{}},
+		Beszel:          BeszelSnapshot{URL: lc.cfg.BeszelURL, Hosts: []BeszelHostItem{}},
+		Kuma:            KumaPublicSnapshot{Monitors: []KumaPublicMonitor{}},
+		Embeds: EmbedConfig{
+			BeszelURL:      lc.cfg.BeszelEmbed,
+			BeszelFrameURL: computeFrameURL(lc.cfg.BeszelEmbed, lc.cfg.EnableEmbedProxy),
+			KumaURL:        lc.cfg.UptimeKumaEmbed,
+			KumaFrameURL:   computeFrameURL(lc.cfg.UptimeKumaEmbed, lc.cfg.EnableEmbedProxy),
+			ProxyEnabled:   lc.cfg.EnableEmbedProxy,
+			DozzleURL:      lc.cfg.DozzleURL,
+		},
+		Incidents: []IncidentItem{
+			{Level: "info", Badge: "SYNC", Title: "Initialer Live-Check läuft…", Meta: "Docker Engine · Dienste · TLS · WUD", Detail: "Erste vollständige Live-Abfrage dauert 1–2 Sekunden.", Time: "JETZT"},
+		},
 	}
 }
 
@@ -1902,7 +1972,7 @@ func (lc *LiveCollector) Start(ctx context.Context) {
 	ticker := time.NewTicker(lc.cfg.PollInterval)
 	go func() {
 		defer ticker.Stop()
-		time.Sleep(700 * time.Millisecond)
+		time.Sleep(600 * time.Millisecond)
 		lc.refresh()
 		for {
 			select {
@@ -1919,12 +1989,6 @@ func (lc *LiveCollector) Latest() DashboardPayload {
 	lc.mu.RLock()
 	p := lc.latest
 	lc.mu.RUnlock()
-	if p.Mode == "" {
-		lc.refresh()
-		lc.mu.RLock()
-		p = lc.latest
-		lc.mu.RUnlock()
-	}
 	// Overlay freshest 2-second in-memory host CPU/RAM/Network telemetry on every poll
 	sys := lc.sampler.Snapshot()
 	p.Timestamp = time.Now().Format(time.RFC3339)
@@ -2708,6 +2772,25 @@ func main() {
 	}
 	fileServer := http.FileServer(http.FS(webSub))
 
+	// Build atomic single-document HTML in RAM (CSS + JS inlined) so browser caches
+	// can NEVER serve mismatched HTML + stale CSS/JS after a Portainer redeploy.
+	indexRaw, err := fs.ReadFile(webSub, "index.html")
+	if err != nil {
+		log.Fatalf("read embedded index.html: %v", err)
+	}
+	cssRaw, err := fs.ReadFile(webSub, "css/style.css")
+	if err != nil {
+		log.Fatalf("read embedded css/style.css: %v", err)
+	}
+	jsRaw, err := fs.ReadFile(webSub, "js/main.js")
+	if err != nil {
+		log.Fatalf("read embedded js/main.js: %v", err)
+	}
+	atomicHTMLStr := string(indexRaw)
+	atomicHTMLStr = strings.Replace(atomicHTMLStr, `<link rel="stylesheet" href="/css/style.css" />`, "<style>\n"+string(cssRaw)+"\n</style>", 1)
+	atomicHTMLStr = strings.Replace(atomicHTMLStr, `<script src="/js/main.js" defer></script>`, "<script>\n"+string(jsRaw)+"\n</script>", 1)
+	atomicIndexHTML := []byte(atomicHTMLStr)
+
 	var beszelProxy, kumaProxy *httputil.ReverseProxy
 	var beszelTarget, kumaTarget *url.URL
 	if cfg.EnableEmbedProxy {
@@ -2729,7 +2812,7 @@ func main() {
 
 	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 		payload := collector.Latest()
 		_ = json.NewEncoder(w).Encode(payload)
 	})
@@ -2737,23 +2820,24 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
 
-		// 1. Root NOC Dashboard
+		// 1. Root NOC Dashboard (atomic inline CSS+JS, never stale-cached)
 		if p == "/" || p == "/index.html" {
-			w.Header().Set("Cache-Control", "no-cache")
-			fileServer.ServeHTTP(w, r)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+			w.Header().Set("Pragma", "no-cache")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(atomicIndexHTML)
 			return
 		}
 
-		// 2. Embedded static assets (CSS, JS, self-hosted WOFF2 fonts, favicon)
+		// 2. Embedded static assets (self-hosted WOFF2 fonts, favicon, direct CSS/JS)
 		cleanRel := strings.TrimPrefix(filepath.Clean(p), "/")
 		if cleanRel != "" && !strings.HasPrefix(cleanRel, "..") {
 			if info, err := fs.Stat(webSub, cleanRel); err == nil && !info.IsDir() {
 				if strings.HasPrefix(p, "/fonts/") {
 					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-				} else if strings.HasPrefix(p, "/css/") || strings.HasPrefix(p, "/js/") {
-					w.Header().Set("Cache-Control", "public, max-age=300")
 				} else {
-					w.Header().Set("Cache-Control", "no-cache")
+					w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 				}
 				fileServer.ServeHTTP(w, r)
 				return

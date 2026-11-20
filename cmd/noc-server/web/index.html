@@ -11,63 +11,71 @@
   <link rel="preload" href="/fonts/instrument-serif-italic-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/css/style.css" />
 </head>
-<body class="is-night mode-tablet tab-noc">
+<body class="is-night mode-desktop tab-noc">
   <div class="noc-shell">
 
-    <!-- ─── TOPBAR: CMY MARK · VERDICT · REITER · TABLET/DESKTOP · TAG/NACHT ─── -->
+    <!-- ─── TOPBAR: CLEAN 2-ZONE NOC HEADER (KEIN VERZERRTES OVAL) ─── -->
     <header class="noc-topbar">
-      <div class="topbar-brand">
-        <span class="mark" aria-hidden="true" data-spin>
-          <svg width="140" height="136" viewBox="0 0 140 136" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle class="c-yellow" cx="70" cy="44" r="42" fill="#F4B41A"/>
-            <circle class="c-cyan" cx="45" cy="87" r="42" fill="#08B4C4"/>
-            <circle class="c-magenta" cx="95" cy="87" r="42" fill="#E2366E"/>
-          </svg>
-        </span>
-        <div class="brand-copy">
-          <span class="brand-title">MORITZ HAMMER · NOC</span>
-          <span class="brand-sub" id="topbar-host-sub">192.168.178.90</span>
-        </div>
-      </div>
-
-      <div class="global-verdict" id="global-verdict" role="status" aria-live="polite">
-        <span class="verdict-led" aria-hidden="true"></span>
-        <span id="global-verdict-text">VERBINDE MIT LIVE-TELEMETRIE…</span>
-      </div>
-
-      <div class="topbar-controls">
-        <!-- 4 Live-Reiter (Kein statisches Grafana/PromQL, sondern echte Live-Telemetrie!) -->
-        <div class="pill-group" role="group" aria-label="Reiter wählen">
-          <button type="button" class="pill-btn" data-tab="noc" aria-pressed="true">NOC</button>
-          <button type="button" class="pill-btn" data-tab="kuma-beszel" aria-pressed="false">Beszel &amp; Kuma</button>
-          <button type="button" class="pill-btn" data-tab="wud" aria-pressed="false" id="tab-btn-wud">WUD</button>
-          <button type="button" class="pill-btn" data-tab="telemetry" aria-pressed="false">Live-Telemetrie</button>
+      <div class="topbar-row-primary">
+        <div class="topbar-brand">
+          <span class="mark" aria-hidden="true" data-spin>
+            <svg width="140" height="136" viewBox="0 0 140 136" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle class="c-yellow" cx="70" cy="44" r="42" fill="#F4B41A"/>
+              <circle class="c-cyan" cx="45" cy="87" r="42" fill="#08B4C4"/>
+              <circle class="c-magenta" cx="95" cy="87" r="42" fill="#E2366E"/>
+            </svg>
+          </span>
+          <div class="brand-copy">
+            <span class="brand-title">MORITZ HAMMER · NOC</span>
+            <span class="brand-sub" id="topbar-host-sub">192.168.178.90</span>
+          </div>
         </div>
 
-        <!-- Tablet / Desktop Umschalter -->
-        <div class="pill-group" role="group" aria-label="Layout-Modus">
-          <button type="button" class="pill-btn" data-layout="tablet" aria-pressed="true" title="8–10 Zoll Tablet-Kiosk (100dvh, kein Scrollen)">Tablet</button>
-          <button type="button" class="pill-btn" data-layout="desktop" aria-pressed="false" title="Desktop-Ansicht mit CMY-Header &amp; Schnellzugriff">Desktop</button>
+        <div class="global-verdict" id="global-verdict" role="status" aria-live="polite">
+          <span class="verdict-led" aria-hidden="true"></span>
+          <span id="global-verdict-text">VERBINDE MIT LIVE-TELEMETRIE…</span>
         </div>
-
-        <!-- Tag / Nacht Umschalter -->
-        <div class="pill-group" role="group" aria-label="Farbschema">
-          <button type="button" class="pill-btn" data-theme="day" aria-pressed="false">Tag</button>
-          <button type="button" class="pill-btn" data-theme="night" aria-pressed="true">Nacht</button>
-        </div>
-
-        <!-- Live / Alarm-Test -->
-        <div class="pill-group" role="group" aria-label="Datenmodus">
-          <button type="button" class="pill-btn sim-live" data-sim="live" id="btn-mode-live" aria-pressed="true">● Live</button>
-          <button type="button" class="pill-btn sim-warn" data-sim="warn" aria-pressed="false" title="Alarm-Test: Warnung">▲</button>
-          <button type="button" class="pill-btn sim-crit" data-sim="crit" aria-pressed="false" title="Alarm-Test: Kritisch">■</button>
-        </div>
-
-        <button type="button" class="pill-btn" id="btn-kiosk-fs" aria-pressed="false" title="Vollbild &amp; Screen Wake-Lock">⛶</button>
 
         <div class="noc-clock-box">
           <span id="noc-clock">--:--:--</span>
           <span class="noc-clock-sub" id="noc-refresh-label">LIVE 5S</span>
+        </div>
+      </div>
+
+      <div class="topbar-row-controls">
+        <!-- 4 Live-Reiter -->
+        <nav class="pill-group" role="group" aria-label="Reiter wählen">
+          <button type="button" class="pill-btn" data-tab="noc" aria-pressed="true">NOC</button>
+          <button type="button" class="pill-btn" data-tab="kuma-beszel" aria-pressed="false">Beszel &amp; Kuma</button>
+          <button type="button" class="pill-btn" data-tab="wud" aria-pressed="false" id="tab-btn-wud">WUD</button>
+          <button type="button" class="pill-btn" data-tab="telemetry" aria-pressed="false">Live-Telemetrie</button>
+        </nav>
+
+        <div class="topbar-right-tools">
+          <!-- Tablet / Desktop Umschalter -->
+          <div class="pill-group" role="group" aria-label="Layout-Modus">
+            <button type="button" class="pill-btn" data-layout="tablet" aria-pressed="false" title="8–10 Zoll Tablet-Kiosk (kompakt)">Tablet</button>
+            <button type="button" class="pill-btn" data-layout="desktop" aria-pressed="true" title="Desktop-Ansicht mit CMY-Header &amp; Schnellzugriff">Desktop</button>
+          </div>
+
+          <!-- Tag / Nacht Umschalter -->
+          <div class="pill-group" role="group" aria-label="Farbschema">
+            <button type="button" class="pill-btn" data-theme="day" aria-pressed="false">Tag</button>
+            <button type="button" class="pill-btn" data-theme="night" aria-pressed="true">Nacht</button>
+          </div>
+
+          <!-- Live / Alarm-Test -->
+          <div class="pill-group sim-group" role="group" aria-label="Datenmodus">
+            <button type="button" class="pill-btn sim-live" data-sim="live" id="btn-mode-live" aria-pressed="true">Live</button>
+            <button type="button" class="pill-btn sim-warn" data-sim="warn" aria-pressed="false" title="Alarm-Test: Warnung">Warn</button>
+            <button type="button" class="pill-btn sim-crit" data-sim="crit" aria-pressed="false" title="Alarm-Test: Kritisch">Alarm</button>
+          </div>
+
+          <button type="button" class="icon-btn" id="btn-kiosk-fs" aria-pressed="false" title="Vollbild &amp; Screen Wake-Lock" aria-label="Vollbild">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+            </svg>
+          </button>
         </div>
       </div>
     </header>
@@ -94,7 +102,7 @@
     </section>
 
     <!-- ═══════════════════════════════════════════════════════════════════════
-         REITER 1: NOC MONITOR (5 ZEILEN · INFOKARTEN AUSKLAPPBAR)
+         REITER 1: NOC MONITOR (5 ZEILEN)
          ═══════════════════════════════════════════════════════════════════════ -->
     <main class="view-pane pane-noc" id="pane-noc" aria-label="NOC Statusmonitor">
       <div class="noc-grid-view" id="noc-monitor-view">
@@ -140,7 +148,7 @@
               <div class="stat-top">
                 <span class="stat-label">Container healthy</span>
                 <div class="card-head-right">
-                  <span class="stat-src-chip">Docker Engine</span>
+                  <span class="stat-src-chip">Docker</span>
                   <span class="chevron" aria-hidden="true">▾</span>
                 </div>
               </div>
@@ -164,7 +172,7 @@
           </div>
         </section>
 
-        <!-- ZEILE 2: KRITISCHE DIENSTE (REINE BINÄRE STATUSMATRIX · NICHT ANKLICKBAR) -->
+        <!-- ZEILE 2: KRITISCHE DIENSTE (REINE BINÄRE STATUSMATRIX · NICHT ANKLICKBAR · VORGERENDERT) -->
         <section class="noc-row" aria-label="Zeile 2: Kritische Dienste">
           <div class="row-header">
             <div class="row-title-wrap">
@@ -174,10 +182,35 @@
             <span class="row-source">Binär: Grün = Online · Rot = Offline</span>
           </div>
 
-          <div class="services-matrix" id="services-matrix"></div>
+          <div class="services-matrix" id="services-matrix">
+            <article class="svc-tile">
+              <div class="svc-head"><h3 class="svc-name">Vaultwarden</h3><span class="svc-badge"><span class="svc-led"></span>ONLINE</span></div>
+              <div class="svc-foot"><span>Passwort-Manager</span><span class="svc-latency">prüfe…</span></div>
+            </article>
+            <article class="svc-tile">
+              <div class="svc-head"><h3 class="svc-name">Immich</h3><span class="svc-badge"><span class="svc-led"></span>ONLINE</span></div>
+              <div class="svc-foot"><span>Fotoverwaltung</span><span class="svc-latency">prüfe…</span></div>
+            </article>
+            <article class="svc-tile">
+              <div class="svc-head"><h3 class="svc-name">Paperless-ngx</h3><span class="svc-badge"><span class="svc-led"></span>ONLINE</span></div>
+              <div class="svc-foot"><span>Dokumente</span><span class="svc-latency">prüfe…</span></div>
+            </article>
+            <article class="svc-tile">
+              <div class="svc-head"><h3 class="svc-name">Nginx Proxy Manager</h3><span class="svc-badge"><span class="svc-led"></span>ONLINE</span></div>
+              <div class="svc-foot"><span>Reverse Proxy &amp; SSL</span><span class="svc-latency">prüfe…</span></div>
+            </article>
+            <article class="svc-tile">
+              <div class="svc-head"><h3 class="svc-name">Uptime Kuma</h3><span class="svc-badge"><span class="svc-led"></span>ONLINE</span></div>
+              <div class="svc-foot"><span>Monitoring</span><span class="svc-latency">prüfe…</span></div>
+            </article>
+            <article class="svc-tile">
+              <div class="svc-head"><h3 class="svc-name">Website</h3><span class="svc-badge"><span class="svc-led"></span>ONLINE</span></div>
+              <div class="svc-foot"><span>info.moritzhammer.org</span><span class="svc-latency">prüfe…</span></div>
+            </article>
+          </div>
         </section>
 
-        <!-- ZEILE 3: INFRASTRUKTURZUSTAND (AUSKLAPPBARE GAUGES & LIVE SPARKLINE) -->
+        <!-- ZEILE 3: INFRASTRUKTURZUSTAND -->
         <section class="noc-row" aria-label="Zeile 3: Infrastrukturzustand">
           <div class="row-header">
             <div class="row-title-wrap">
@@ -243,18 +276,18 @@
               <div class="gauge-top">
                 <span class="gauge-label">Netzwerk</span>
                 <div class="card-head-right">
-                  <span class="gauge-detail" id="net-iface-label">NIC eth0</span>
+                  <span class="gauge-detail" id="net-iface-label">NIC host</span>
                   <span class="chevron" aria-hidden="true">▾</span>
                 </div>
               </div>
               <div class="net-rates">
                 <div class="net-rate-item">
                   <span class="net-dir">↓ Inbound</span>
-                  <span class="net-val net-val--in" id="net-in-val">0 Kbit/s</span>
+                  <span class="net-val net-val--in" id="net-in-val">0.0 Kbit/s</span>
                 </div>
                 <div class="net-rate-item">
                   <span class="net-dir">↑ Outbound</span>
-                  <span class="net-val net-val--out" id="net-out-val">0 Kbit/s</span>
+                  <span class="net-val net-val--out" id="net-out-val">0.0 Kbit/s</span>
                 </div>
               </div>
               <svg class="net-spark" viewBox="0 0 240 26" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -266,7 +299,7 @@
           </div>
         </section>
 
-        <!-- ZEILE 4: CONTAINER-GESUNDHEIT & WUD UPDATES (AUSKLAPPBAR) -->
+        <!-- ZEILE 4: CONTAINER-GESUNDHEIT & WUD UPDATES -->
         <section class="noc-row" aria-label="Zeile 4: Container-Gesundheit und WUD Updates">
           <div class="row-header">
             <div class="row-title-wrap">
@@ -323,11 +356,11 @@
 
             <div class="restarts-box">
               <div class="restarts-head">
-                <span>Top Restarts / Offene Updates</span>
+                <span>Top Restarts / Updates</span>
                 <span id="restarts-src">Docker &amp; WUD</span>
               </div>
               <ul class="restart-list" id="restart-list">
-                <li class="restart-empty"><span>✓ Alle Container stabil</span><span>0 Restarts</span></li>
+                <li class="restart-empty"><span>Alle Container stabil</span><span>0 Restarts</span></li>
               </ul>
             </div>
           </div>
@@ -343,7 +376,20 @@
             <span class="row-source">Max. 5 Ereignisse · Klick auf eine Meldung für Details</span>
           </div>
 
-          <ul class="incidents-list" id="incidents-list"></ul>
+          <ul class="incidents-list" id="incidents-list">
+            <li class="incident-card level-info">
+              <div class="inc-row-main">
+                <div class="inc-left">
+                  <span class="inc-badge">INFO</span>
+                  <div class="inc-text">
+                    <span class="inc-title">Lade Live-Ereignisse vom Docker-Host…</span>
+                    <span class="inc-meta">192.168.178.90 · Initialer Sync</span>
+                  </div>
+                </div>
+                <span class="inc-time">SYNC</span>
+              </div>
+            </li>
+          </ul>
         </section>
       </div>
 
@@ -374,9 +420,9 @@
             <div class="quick-top"><span class="quick-name">Nginx Proxy Manager</span><span class="quick-port">:81 ↗</span></div>
             <span class="quick-tag">Reverse Proxy &amp; SSL</span>
           </a>
-          <a class="quick-card" href="http://192.168.178.90:3001" target="_blank" rel="noopener">
+          <a class="quick-card" href="http://192.168.178.90:3001/status/overview" target="_blank" rel="noopener">
             <div class="quick-top"><span class="quick-name">Uptime Kuma</span><span class="quick-port">:3001 ↗</span></div>
-            <span class="quick-tag">Monitoring</span>
+            <span class="quick-tag">Status &amp; Monitoring</span>
           </a>
           <a class="quick-card" href="http://192.168.178.90:8099/system/n9qil9mgcw9fhwm" target="_blank" rel="noopener">
             <div class="quick-top"><span class="quick-name">Beszel</span><span class="quick-port">:8099 ↗</span></div>
@@ -421,7 +467,6 @@
           </div>
         </div>
 
-        <!-- Native API Strips (automatisch sichtbar, wenn Beszel/Kuma API konfiguriert) -->
         <div class="beszel-hosts-bar" id="beszel-hosts-bar" hidden></div>
         <div class="kuma-monitors-bar" id="kuma-monitors-bar" hidden></div>
 
@@ -442,7 +487,7 @@
               <iframe id="iframe-beszel" src="about:blank" title="Beszel Live-Monitoring"></iframe>
             </div>
             <div class="embed-hint" id="hint-beszel">
-              Same-Origin-Proxy aktiv (<code>/system/n9qil9mgcw9fhwm</code> → <code>:8099</code>) — entfernt <code>X-Frame-Options</code> automatisch. Einmal einloggen bleibt im Browser gespeichert.
+              Same-Origin-Proxy aktiv (<code>/system/n9qil9mgcw9fhwm</code> → <code>:8099</code>) — entfernt <code>X-Frame-Options</code> automatisch.
             </div>
           </article>
 
@@ -492,7 +537,6 @@
          REITER 4: LIVE-TELEMETRIE (LIVE CHARTS · CONTAINER EXPLORER · SSL)
          ═══════════════════════════════════════════════════════════════════════ -->
     <section class="view-pane pane-telemetry" id="pane-telemetry" aria-label="Live-Telemetrie und Container Explorer">
-      <!-- Live Rolling Time-Series Charts (Pure SVG, 0 externe Libs) -->
       <div class="tele-section">
         <div class="section-bar">
           <div class="row-title-wrap">
@@ -551,12 +595,11 @@
               <polyline id="chart-net-in" points="0,108 360,108" class="chart-line-cyan" />
               <polyline id="chart-net-out" points="0,108 360,108" class="chart-line-yellow" />
             </svg>
-            <div class="chart-foot"><span id="chart-net-totals">RX 0 GB · TX 0 GB</span><span id="chart-net-peak">Peak: 0 Mbit/s</span></div>
+            <div class="chart-foot"><span id="chart-net-totals">RX 0 GB · TX 0 GB</span><span id="chart-net-peak">Peak: 0 Kbit/s</span></div>
           </article>
         </div>
       </div>
 
-      <!-- Live Docker Container Explorer (Filterbar + Ausklappbare Karten!) -->
       <div class="tele-section">
         <div class="section-bar">
           <div class="row-title-wrap">
@@ -574,7 +617,6 @@
         <div class="container-explorer-grid" id="container-explorer-grid"></div>
       </div>
 
-      <!-- Live SSL-Zertifikate Inspector (Ausklappbare Karten!) -->
       <div class="tele-section">
         <div class="section-bar">
           <div class="row-title-wrap">

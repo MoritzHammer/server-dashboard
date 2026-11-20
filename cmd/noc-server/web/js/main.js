@@ -134,7 +134,7 @@ function applyTab(tab) {
   document.querySelectorAll('[data-tab]').forEach(function (b) {
     b.setAttribute('aria-pressed', String(b.getAttribute('data-tab') === tab));
   });
-  window.scrollTo({ top: 0, behavior: 'instant' });
+  try { window.scrollTo(0, 0); } catch (e) {}
   syncExpandedBodyClass();
   if (tab === 'kuma-beszel') {
     ensureEmbedFramesLoaded(false);
@@ -161,7 +161,7 @@ function syncExpandedBodyClass() {
   document.body.classList.toggle('has-expanded', anyOpenOnNoc);
 }
 
-(function () {
+function initUIState() {
   var savedTheme = null;
   var savedLayout = null;
   var savedEmbedMode = null;
@@ -176,8 +176,8 @@ function syncExpandedBodyClass() {
   if (savedLayout === 'tablet' || savedLayout === 'desktop') {
     applyLayout(savedLayout, false);
   } else {
-    var autoDesktop = window.innerWidth >= 900 && !window.matchMedia('(pointer: coarse)').matches;
-    applyLayout(autoDesktop ? 'desktop' : 'tablet', false);
+    var isCoarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    applyLayout(window.innerWidth >= 900 && !isCoarse ? 'desktop' : 'tablet', false);
   }
 
   if (savedEmbedMode === 'direct' || savedEmbedMode === 'proxy') {
@@ -186,81 +186,110 @@ function syncExpandedBodyClass() {
       b.setAttribute('aria-pressed', String(b.getAttribute('data-embed-mode') === savedEmbedMode));
     });
   }
+}
 
-  document.querySelectorAll('[data-theme]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      applyTheme(btn.getAttribute('data-theme'), true);
-    });
-  });
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initUIState);
+} else {
+  initUIState();
+}
 
-  document.querySelectorAll('[data-layout]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      applyLayout(btn.getAttribute('data-layout'), true);
-    });
-  });
-
-  document.querySelectorAll('[data-tab]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      applyTab(btn.getAttribute('data-tab'));
-    });
-  });
-
-  var embedGrid = document.getElementById('embed-grid');
-  document.querySelectorAll('[data-embed-layout]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var l = btn.getAttribute('data-embed-layout');
-      document.querySelectorAll('[data-embed-layout]').forEach(function (b) {
-        b.setAttribute('aria-pressed', String(b === btn));
-      });
-      if (embedGrid) embedGrid.className = 'embed-grid layout-' + l;
-    });
-  });
-
-  document.querySelectorAll('[data-embed-mode]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      state.embedSourceMode = btn.getAttribute('data-embed-mode') === 'direct' ? 'direct' : 'proxy';
-      try { localStorage.setItem('noc_embed_mode', state.embedSourceMode); } catch (e) {}
-      document.querySelectorAll('[data-embed-mode]').forEach(function (b) {
-        b.setAttribute('aria-pressed', String(b.getAttribute('data-embed-mode') === state.embedSourceMode));
-      });
-      ensureEmbedFramesLoaded(true);
-    });
-  });
-
-  var relB = document.getElementById('reload-beszel');
-  var relK = document.getElementById('reload-kuma');
-  if (relB) {
-    relB.addEventListener('click', function () {
-      var fr = document.getElementById('iframe-beszel');
-      var desired = computeDesiredEmbedURLs();
-      if (fr) {
-        state.activeBeszelSrc = desired.beszel;
-        fr.src = desired.beszel;
-      }
-    });
-  }
-  if (relK) {
-    relK.addEventListener('click', function () {
-      var fr = document.getElementById('iframe-kuma');
-      var desired = computeDesiredEmbedURLs();
-      if (fr) {
-        state.activeKumaSrc = desired.kuma;
-        fr.src = desired.kuma;
-      }
-    });
-  }
-
-  document.querySelectorAll('[data-cfilter]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      setContainerFilter(btn.getAttribute('data-cfilter'));
-    });
-  });
-})();
-
-// ─── 3. EXPANDABLE INFO CARDS (DELEGATED CLICK — PERSISTS ACROSS LIVE POLLS!) ───
+// ─── 3. UNIFIED DOCUMENT-LEVEL CLICK DELEGATION (ALL BUTTONS & EXPANDABLE CARDS) ───
 document.addEventListener('click', function (e) {
-  if (e.target.closest('a, button')) return;
-  var card = e.target.closest('.is-expandable');
+  var target = e.target;
+  if (!target || !target.closest) return;
+
+  var themeBtn = target.closest('[data-theme]');
+  if (themeBtn) {
+    applyTheme(themeBtn.getAttribute('data-theme'), true);
+    return;
+  }
+
+  var layoutBtn = target.closest('[data-layout]');
+  if (layoutBtn) {
+    applyLayout(layoutBtn.getAttribute('data-layout'), true);
+    return;
+  }
+
+  var tabBtn = target.closest('[data-tab]');
+  if (tabBtn) {
+    applyTab(tabBtn.getAttribute('data-tab'));
+    return;
+  }
+
+  var embedLayoutBtn = target.closest('[data-embed-layout]');
+  if (embedLayoutBtn) {
+    var l = embedLayoutBtn.getAttribute('data-embed-layout');
+    document.querySelectorAll('[data-embed-layout]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b === embedLayoutBtn));
+    });
+    var embedGrid = document.getElementById('embed-grid');
+    if (embedGrid) embedGrid.className = 'embed-grid layout-' + l;
+    return;
+  }
+
+  var embedModeBtn = target.closest('[data-embed-mode]');
+  if (embedModeBtn) {
+    state.embedSourceMode = embedModeBtn.getAttribute('data-embed-mode') === 'direct' ? 'direct' : 'proxy';
+    try { localStorage.setItem('noc_embed_mode', state.embedSourceMode); } catch (err) {}
+    document.querySelectorAll('[data-embed-mode]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-embed-mode') === state.embedSourceMode));
+    });
+    ensureEmbedFramesLoaded(true);
+    return;
+  }
+
+  if (target.closest('#reload-beszel')) {
+    var frB = document.getElementById('iframe-beszel');
+    var desB = computeDesiredEmbedURLs();
+    if (frB) {
+      state.activeBeszelSrc = desB.beszel;
+      frB.src = desB.beszel;
+    }
+    return;
+  }
+
+  if (target.closest('#reload-kuma')) {
+    var frK = document.getElementById('iframe-kuma');
+    var desK = computeDesiredEmbedURLs();
+    if (frK) {
+      state.activeKumaSrc = desK.kuma;
+      frK.src = desK.kuma;
+    }
+    return;
+  }
+
+  var cfilterBtn = target.closest('[data-cfilter]');
+  if (cfilterBtn) {
+    setContainerFilter(cfilterBtn.getAttribute('data-cfilter'));
+    return;
+  }
+
+  var simBtn = target.closest('[data-sim]');
+  if (simBtn && typeof window.__nocHandleSimClick === 'function') {
+    window.__nocHandleSimClick(simBtn);
+    return;
+  }
+
+  if (target.closest('#btn-kiosk-fs')) {
+    var fsBtn = document.getElementById('btn-kiosk-fs');
+    if (!document.fullscreenElement) {
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(function () {});
+      }
+      if (fsBtn) fsBtn.setAttribute('aria-pressed', 'true');
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(function () {});
+      }
+      if (fsBtn) fsBtn.setAttribute('aria-pressed', 'false');
+    }
+    return;
+  }
+
+  // Expandable Info Cards (ignore links/buttons inside drawers)
+  if (target.closest('a, button')) return;
+  var card = target.closest('.is-expandable');
   if (!card) return;
   var id = card.getAttribute('data-card-id');
   if (!id) return;
@@ -340,23 +369,10 @@ document.addEventListener('click', function (e) {
   });
 })();
 
-// ─── 5. FULLSCREEN & SCREEN WAKE LOCK ───
+// ─── 5. SCREEN WAKE LOCK ───
 (function () {
-  var fsBtn = document.getElementById('btn-kiosk-fs');
   async function requestWakeLock() {
     try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch (e) {}
-  }
-  if (fsBtn) {
-    fsBtn.addEventListener('click', function () {
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(function () {});
-        requestWakeLock();
-        fsBtn.setAttribute('aria-pressed', 'true');
-      } else {
-        document.exitFullscreen().catch(function () {});
-        fsBtn.setAttribute('aria-pressed', 'false');
-      }
-    });
   }
   requestWakeLock();
 })();
@@ -631,7 +647,7 @@ function renderEmbeds(embeds, beszel, kuma) {
         var down = h.status !== 'up';
         return (
           '<div class="beszel-host-chip' + (down ? ' is-down' : '') + '">' +
-            '<strong>Beszel · ' + esc(h.name) + ' (' + esc(h.status.toUpperCase()) + ')</strong>' +
+            '<strong>Beszel · ' + esc(h.name) + ' (' + esc((h.status || 'unknown').toUpperCase()) + ')</strong>' +
             '<span class="beszel-host-stats">CPU ' + esc(h.cpu) + '% · RAM ' + esc(h.mem) + '% · Disk ' + esc(h.disk) + '%' + (h.temp > 0 ? (' · ' + esc(h.temp) + '°C') : '') + '</span>' +
           '</div>'
         );
@@ -661,7 +677,6 @@ function renderEmbeds(embeds, beszel, kuma) {
 
 function renderPayload(data) {
   if (!data) return;
-  state.lastPayload = data;
 
   var hostSubEl = document.getElementById('topbar-host-sub');
   var verdictEl = document.getElementById('global-verdict');
@@ -710,17 +725,17 @@ function renderPayload(data) {
 
   // Zeile 2: Kritische Dienste (Reine binäre Statusmatrix — nicht anklickbar)
   var matrixEl = document.getElementById('services-matrix');
-  if (matrixEl && Array.isArray(data.critical_services)) {
+  if (matrixEl && Array.isArray(data.critical_services) && data.critical_services.length > 0) {
     var cols = Math.min(Math.max(data.critical_services.length, 3), 6);
     matrixEl.style.setProperty('--svc-cols', String(cols));
     matrixEl.innerHTML = data.critical_services.map(function (svc) {
       var offCls = svc.online ? '' : ' is-offline';
-      var badge = svc.online ? '✅ ONLINE' : '🚨 OFFLINE';
+      var badgeText = svc.online ? 'ONLINE' : 'OFFLINE';
       return (
         '<article class="svc-tile' + offCls + '">' +
           '<div class="svc-head">' +
             '<h3 class="svc-name">' + esc(svc.name) + '</h3>' +
-            '<span class="svc-badge">' + badge + '</span>' +
+            '<span class="svc-badge"><span class="svc-led"></span>' + badgeText + '</span>' +
           '</div>' +
           '<div class="svc-foot">' +
             '<span>' + esc(svc.category) + '</span>' +
@@ -835,14 +850,14 @@ function renderPayload(data) {
           return '<li class="restart-item"><div><div class="restart-name">' + esc(u.container) + '</div><div class="restart-reason">' + esc(u.current_tag) + ' → ' + esc(u.new_tag) + '</div></div><span class="restart-count">UPD</span></li>';
         }).join('');
       } else {
-        rl.innerHTML = '<li class="restart-empty"><span>✓ Alle Container ohne Neustarts</span><span>0 Restarts</span></li>';
+        rl.innerHTML = '<li class="restart-empty"><span>Alle Container ohne Neustarts</span><span>0 Restarts</span></li>';
       }
     }
   }
 
   // Zeile 5: Incidents (Expandable!)
   var incList = document.getElementById('incidents-list');
-  if (incList && Array.isArray(data.incidents)) {
+  if (incList && Array.isArray(data.incidents) && data.incidents.length > 0) {
     incList.innerHTML = data.incidents.slice(0, 5).map(function (inc, idx) {
       var cid = 'inc-' + idx + '-' + (inc.title || '').slice(0, 16);
       var openCls = state.expandedCards.has(cid) ? ' is-open' : '';
@@ -874,6 +889,7 @@ function renderPayload(data) {
   renderLiveCharts(data);
   renderContainerExplorer(data.containers);
   renderSSLInspector(data.ssl_certs);
+  state.lastPayload = data;
 }
 
 // ─── 8. LIVE POLLING & TEST SCENARIOS (ONLY MORITZ' REAL SERVICES) ───
@@ -887,7 +903,7 @@ function renderPayload(data) {
     executive_summary: [
       { id: 'services-online', value: '6 / 6', source: 'Uptime Kuma', status: 'ok', sub: '100 % Verfügbarkeit', details: ['✓ Vaultwarden (4 ms)', '✓ Immich (8 ms)', '✓ Paperless-ngx (6 ms)', '✓ Nginx Proxy Manager (3 ms)', '✓ Uptime Kuma (5 ms)', '✓ Website (2 ms)'] },
       { id: 'hosts-online', value: '1 / 1', source: 'Beszel', status: 'ok', sub: '192.168.178.90 · Uptime 14d 6h', details: ['Docker-Host (UP): CPU 24% · RAM 52% · Disk 58%'] },
-      { id: 'containers-healthy', value: '14 / 14', source: 'Docker Engine', status: 'ok', sub: '14 laufende Container · 0 unhealthy', details: ['Healthy / Laufend: 14', 'Unhealthy: 0', 'Neustarts: 0', 'WUD Updates: 2'] },
+      { id: 'containers-healthy', value: '14 / 14', source: 'Docker', status: 'ok', sub: '14 laufende Container · 0 unhealthy', details: ['Healthy / Laufend: 14', 'Unhealthy: 0', 'Neustarts: 0', 'WUD Updates: 2'] },
       { id: 'ssl-status', value: 'OK', source: 'Live TLS', status: 'ok', sub: 'Min. 68 Tage · info.moritzhammer.org', details: ['✓ info.moritzhammer.org: noch 68 Tage'] }
     ],
     critical_services: [
@@ -907,7 +923,7 @@ function renderPayload(data) {
         { id: 'ram', value: 52, unit: '%', status: 'ok', state_tag: 'NOMINAL', detail: '16.6 / 32.0 GB belegt', extra: ['Verfügbar: 15.4 GB', 'Buffers & Page-Cache: 5.2 GB'] },
         { id: 'disk', value: 58, unit: '%', status: 'ok', state_tag: 'NOMINAL', detail: '580 GB / 1.0 TB', extra: ['Frei: 420 GB · Mount: /', 'Belegt: 580 GB'] }
       ],
-      network: { interface: 'eth0', inbound_str: '18.4 Mbit/s', outbound_str: '6.2 Mbit/s', rx_total_gb: 142.8, tx_total_gb: 64.1, in_history: [10, 14, 18, 15, 22, 19, 17, 18], out_history: [4, 5, 6, 5, 8, 7, 6, 6] }
+      network: { interface: 'ens18', inbound_str: '18.4 Mbit/s', outbound_str: '6.2 Mbit/s', rx_total_gb: 142.8, tx_total_gb: 64.1, in_history: [10, 14, 18, 15, 22, 19, 17, 18], out_history: [4, 5, 6, 5, 8, 7, 6, 6] }
     },
     container_health: { available: true, source: 'Docker Engine', healthy: 14, unhealthy: 0, total: 14, restarts: 0, top_restarts: [] },
     containers: [
@@ -948,7 +964,7 @@ function renderPayload(data) {
 
   testScenarios.crit.verdict = { level: 'crit', text: 'EINGRIFF ERFORDERLICH · IMMICH & PAPERLESS-NGX OFFLINE' };
   testScenarios.crit.executive_summary[0] = { id: 'services-online', value: '4 / 6', source: 'Uptime Kuma', status: 'crit', sub: '2 kritische Dienste OFFLINE', details: ['✕ Immich (HTTP 502)', '✕ Paperless-ngx (TIMEOUT)'] };
-  testScenarios.crit.executive_summary[2] = { id: 'containers-healthy', value: '12 / 14', source: 'Docker Engine', status: 'crit', sub: '2 Container UNHEALTHY', details: ['Unhealthy: immich_server, paperless_webserver'] };
+  testScenarios.crit.executive_summary[2] = { id: 'containers-healthy', value: '12 / 14', source: 'Docker', status: 'crit', sub: '2 Container UNHEALTHY', details: ['Unhealthy: immich_server, paperless_webserver'] };
   testScenarios.crit.critical_services[1].online = false; testScenarios.crit.critical_services[1].latency = 'HTTP 502';
   testScenarios.crit.critical_services[2].online = false; testScenarios.crit.critical_services[2].latency = 'TIMEOUT';
   testScenarios.crit.infrastructure.gauges[0] = { id: 'cpu', value: 92, unit: '%', status: 'crit', state_tag: 'KRITISCH (>85%)', detail: '8 vCPU · Load 9.85', extra: ['Kritische Auslastung'] };
@@ -959,42 +975,44 @@ function renderPayload(data) {
     { level: 'crit', badge: 'KRITISCH', title: 'CPU-Last kritisch (92 %)', meta: 'Host 192.168.178.90 · Load 9.85', detail: 'Sofort Prozesse in Beszel prüfen.', time: 'AKTIV' }
   ];
 
-  var liveBtn = document.getElementById('btn-mode-live');
-
   async function fetchLive() {
     if (state.simMode !== 'live') return;
+    var liveBtn = document.getElementById('btn-mode-live');
     try {
       var r = await fetch('/api/status', { cache: 'no-store' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       var data = await r.json();
       state.liveConnected = true;
       state.countdown = state.pollEverySec;
-      if (liveBtn) liveBtn.textContent = '● Live';
+      if (liveBtn) liveBtn.textContent = 'Live';
       renderPayload(data);
     } catch (e) {
+      if (window.console && console.warn) console.warn('NOC /api/status fallback:', e);
       state.liveConnected = false;
-      if (liveBtn) liveBtn.textContent = '● Demo';
+      if (liveBtn) liveBtn.textContent = 'Demo';
       if (!state.lastPayload) {
         renderPayload(demoData);
       }
     }
   }
 
-  document.querySelectorAll('[data-sim]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var m = btn.getAttribute('data-sim');
-      state.simMode = m;
-      document.querySelectorAll('[data-sim]').forEach(function (b) {
-        b.setAttribute('aria-pressed', String(b === btn));
-      });
-      if (m === 'live') {
-        fetchLive();
-      } else if (testScenarios[m]) {
-        renderPayload(testScenarios[m]);
-      }
+  window.__nocHandleSimClick = function (btn) {
+    var m = btn.getAttribute('data-sim');
+    state.simMode = m;
+    document.querySelectorAll('[data-sim]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b === btn));
     });
-  });
+    if (m === 'live') {
+      fetchLive();
+    } else if (testScenarios[m]) {
+      renderPayload(testScenarios[m]);
+    }
+  };
 
-  fetchLive();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fetchLive);
+  } else {
+    fetchLive();
+  }
   setInterval(fetchLive, state.pollEverySec * 1000);
 })();
