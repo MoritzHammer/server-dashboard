@@ -43,6 +43,6 @@ In Portainer als Stack über **Git Repository** einbinden:
 - **Repository URL:** `https://github.com/MoritzHammer/server-dashboard`
 - **Repository reference:** `refs/heads/main`
 - **Compose path:** `docker-compose.yml`
-- **Port:** `http://192.168.178.90:8085` (kollidiert nicht mit `website` auf Port `8080`)
+- **Port:** `http://192.168.178.90:3000` (Standardmäßig `3000:80`, optional über die Portainer-Umgebungsvariable `PORT` anpassbar)
 
 Das direkt importierbare Grafana-Dashboard liegt zusätzlich unter [`/grafana-noc-dashboard.json`](static/grafana-noc-dashboard.json).
