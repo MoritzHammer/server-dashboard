@@ -8,7 +8,7 @@
             <span class="row-idx">ZEILE 01</span>
             <h2 class="row-title">Executive Summary</h2>
           </div>
-          <span class="row-source" id="row1-source">Quellen: Live-Probe · Docker Engine · Host /proc · Live TLS</span>
+          <span class="row-source" id="row1-source">Quellen: Uptime Kuma · Beszel · Docker Engine · Live TLS</span>
         </div>
 
         <div class="exec-grid">
@@ -32,7 +32,7 @@
             <span class="row-idx">ZEILE 02</span>
             <h2 class="row-title">Kritische Dienste</h2>
           </div>
-          <span class="row-source" id="row2-source">Binäre Live-Status-Matrix (Grün = Online · Rot = Offline)</span>
+          <span class="row-source" id="row2-source">Binäre Live-Status-Matrix · 192.168.178.90 (Grün = Online · Rot = Offline)</span>
         </div>
 
         <div class="services-matrix" id="services-matrix">
@@ -58,7 +58,7 @@
             <span class="row-idx">ZEILE 03</span>
             <h2 class="row-title">Infrastrukturzustand</h2>
           </div>
-          <span class="row-source" id="row3-source">Host /proc · Live Telemetrie</span>
+          <span class="row-source" id="row3-source">Host /proc &amp; Beszel · Live Telemetrie</span>
         </div>
 
         <div class="infra-grid">
@@ -97,64 +97,64 @@
               </div>
             </div>
             <svg class="net-spark" id="net-spark-svg" viewBox="0 0 240 26" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <polyline id="spark-in" points="0,20 24,18 48,14 72,17 96,10 120,13 144,8 168,12 192,7 216,11 240,9" stroke="#08B4C4" stroke-width="2" fill="none"/>
-              <polyline id="spark-out" points="0,23 24,22 48,20 72,21 96,18 120,19 144,17 168,19 192,16 216,18 240,17" stroke="#E2366E" stroke-width="1.8" fill="none"/>
+              <polyline id="spark-in" points="0,20 40,18 80,15 120,17 160,12 200,14 240,11" stroke="#08B4C4" stroke-width="2" fill="none"/>
+              <polyline id="spark-out" points="0,23 40,22 80,20 120,21 160,19 200,20 240,18" stroke="#E2366E" stroke-width="1.8" fill="none"/>
             </svg>
           </article>
         </div>
       </section>
 
-      <!-- ─── ZEILE 4: CONTAINER-GESUNDHEIT (DOCKER ENGINE SOCKET) ─── -->
+      <!-- ─── ZEILE 4: CONTAINER-GESUNDHEIT & WUD UPDATES ─── -->
       {{- $ch := $noc.container_health -}}
-      <section class="noc-row" aria-label="Zeile 4: Container-Gesundheit">
+      <section class="noc-row" aria-label="Zeile 4: Container-Gesundheit und WUD Updates">
         <div class="row-header">
           <div class="row-title-wrap">
             <span class="row-idx">ZEILE 04</span>
-            <h2 class="row-title">Container-Gesundheit</h2>
+            <h2 class="row-title">Container &amp; WUD Updates</h2>
           </div>
-          <span class="row-source" id="row4-source">Quelle: Docker Engine Socket (Live)</span>
+          <span class="row-source" id="row4-source">Quellen: Docker Engine Socket &amp; What's Up Docker (WUD)</span>
         </div>
 
-        <div class="container-row-grid">
+        <div class="container-row-grid container-row-grid--wud">
           <article class="cnt-stat" id="cnt-healthy">
             <div class="cnt-meta">
-              <span class="cnt-label">Healthy Container</span>
-              <span class="cnt-sub" id="cnt-healthy-sub">Docker Engine · Status OK</span>
+              <span class="cnt-label">Healthy</span>
+              <span class="cnt-sub" id="cnt-healthy-sub">Docker Engine · OK</span>
             </div>
             <span class="cnt-num">{{ $ch.healthy }}</span>
           </article>
 
           <article class="cnt-stat" id="cnt-unhealthy">
             <div class="cnt-meta">
-              <span class="cnt-label">Unhealthy Container</span>
-              <span class="cnt-sub">Zielwert: 0 Container</span>
+              <span class="cnt-label">Unhealthy</span>
+              <span class="cnt-sub">Zielwert: 0</span>
             </div>
             <span class="cnt-num">{{ $ch.unhealthy }}</span>
           </article>
 
           <article class="cnt-stat" id="cnt-restarts">
             <div class="cnt-meta">
-              <span class="cnt-label">Container Restarts</span>
-              <span class="cnt-sub">Neustarts gesamt (Docker)</span>
+              <span class="cnt-label">Restarts</span>
+              <span class="cnt-sub">Docker gesamt</span>
             </div>
             <span class="cnt-num">{{ $ch.restarts_24h }}</span>
           </article>
 
+          <article class="cnt-stat cnt-stat--clickable" id="cnt-wud" title="Klicken für alle verfügbaren WUD Container-Updates">
+            <div class="cnt-meta">
+              <span class="cnt-label">WUD Updates</span>
+              <span class="cnt-sub" id="cnt-wud-sub">Image-Check</span>
+            </div>
+            <span class="cnt-num" id="cnt-wud-num">0</span>
+          </article>
+
           <div class="restarts-box">
             <div class="restarts-head">
-              <span>Container mit den meisten Neustarts</span>
-              <span id="restarts-src">Docker Engine</span>
+              <span>Top Restarts / Offene Updates</span>
+              <span id="restarts-src">Docker &amp; WUD</span>
             </div>
             <ul class="restart-list" id="restart-list">
-              {{- range $ch.top_restarts }}
-              <li class="restart-item">
-                <div>
-                  <div class="restart-name">{{ .name }}</div>
-                  <div class="restart-reason">{{ .reason }}</div>
-                </div>
-                <span class="restart-count">{{ .count }}</span>
-              </li>
-              {{- end }}
+              <li class="restart-empty"><span>✓ Alle Container stabil</span><span>0 Restarts</span></li>
             </ul>
           </div>
         </div>
@@ -167,7 +167,7 @@
             <span class="row-idx">ZEILE 05</span>
             <h2 class="row-title">Warnungen &amp; Incidents</h2>
           </div>
-          <span class="row-source">Max. 5 relevante Ereignisse (Rot = Kritisch · Gelb = Warnung · Blau = Info)</span>
+          <span class="row-source">Max. 5 relevante Ereignisse (Rot = Kritisch · Gelb = Warnung/Update · Blau = Info)</span>
         </div>
 
         <ul class="incidents-list" id="incidents-list">

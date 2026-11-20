@@ -101,12 +101,38 @@ html, body {
   min-height: 100dvh;
 }
 
-/* Single-Screen Zero-Scroll Kiosk Layout on 8-10" Tablet Landscape & Desktop */
-@media (min-width: 900px) and (min-height: 620px) {
-  body.view-noc {
+/* Tablet Kiosk Mode: Strict Single-Screen Zero-Scroll (100dvh) */
+@media (min-width: 820px) and (min-height: 580px) {
+  body.mode-tablet.tab-noc,
+  body.mode-tablet.tab-windows {
     height: 100dvh;
     overflow: hidden;
   }
+}
+
+/* Desktop Mode: Spacious Full Workstation with Live Windows & WUD below NOC */
+body.mode-desktop {
+  height: auto;
+  overflow-y: auto;
+}
+body.mode-desktop .noc-shell {
+  height: auto;
+  gap: 16px;
+  padding: 16px 20px 44px;
+}
+body.mode-desktop .noc-grid-view {
+  grid-template-rows: auto;
+  gap: 14px;
+}
+body.mode-desktop .noc-row {
+  padding: 16px 20px;
+  gap: 12px;
+}
+body.mode-desktop .stat-value {
+  font-size: clamp(36px, 3vw, 52px);
+}
+body.mode-desktop .gauge-num {
+  font-size: clamp(32px, 2.8vw, 44px);
 }
 
 button {
@@ -316,7 +342,7 @@ a {
   text-transform: uppercase;
 }
 
-/* ─── 5-ROW NOC KIOSK GRID (100% SINGLE SCREEN) ─── */
+/* ─── 5-ROW NOC KIOSK GRID (100% SINGLE SCREEN IN TABLET MODE) ─── */
 .noc-grid-view {
   display: grid;
   grid-template-rows: 1.05fr 0.95fr 1.15fr 0.95fr 1fr;
@@ -325,7 +351,9 @@ a {
   min-height: 0;
 }
 
-body.view-blueprint .noc-grid-view {
+body.tab-blueprint .noc-grid-view,
+body.mode-tablet.tab-windows .noc-grid-view,
+body.mode-tablet.tab-wud .noc-grid-view {
   display: none;
 }
 
@@ -714,13 +742,26 @@ body.view-blueprint .noc-grid-view {
   display: block;
 }
 
-/* ─── ZEILE 4: CONTAINER-GESUNDHEIT (DAZZLE) ─── */
+/* ─── ZEILE 4: CONTAINER-GESUNDHEIT & WUD UPDATES ─── */
 .container-row-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr) 1.5fr;
   gap: clamp(8px, 1vw, 14px);
   flex: 1;
   min-height: 0;
+}
+
+.container-row-grid--wud {
+  grid-template-columns: repeat(4, 1fr) 1.55fr;
+}
+
+.cnt-stat--clickable {
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.cnt-stat--clickable:hover {
+  transform: translate3d(0, -1px, 0);
 }
 
 .cnt-stat {
@@ -957,7 +998,388 @@ body.view-blueprint .noc-grid-view {
   flex-shrink: 0;
 }
 
-/* ─── GRAFANA & PROMETHEUS BLUEPRINT VIEW (TAB 2) ─── */
+/* ─── LIVE EMBEDDED WINDOWS (BESZEL & UPTIME KUMA), WUD TRACKER & QUICK-ACCESS ─── */
+.embeds-section,
+.wud-section,
+.quick-section {
+  background: var(--panel-noc);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  padding: clamp(14px, 1.8vw, 22px);
+  display: none;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Desktop Mode: Show Live Windows, WUD & Quick-Access seamlessly below the 5 NOC rows */
+body.mode-desktop:not(.tab-blueprint) .embeds-section,
+body.mode-desktop:not(.tab-blueprint) .wud-section,
+body.mode-desktop:not(.tab-blueprint) .quick-section {
+  display: flex;
+}
+
+/* Tablet Mode: Dedicated full-height views when tapping Beszel & Kuma or WUD */
+body.mode-tablet.tab-windows .embeds-section {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+body.mode-tablet.tab-wud .wud-section,
+body.mode-tablet.tab-wud .quick-section {
+  display: flex;
+}
+
+.section-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.embed-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.beszel-hosts-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.beszel-host-chip {
+  background: var(--card-noc);
+  border: 1px solid var(--ok-border);
+  border-left: 4px solid var(--ok);
+  border-radius: 10px;
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+}
+
+.beszel-host-chip.is-down {
+  border-color: var(--crit-border);
+  border-left-color: var(--crit);
+  background: var(--crit-bg);
+}
+
+.beszel-host-stats {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-sub);
+  font-size: 11.5px;
+}
+
+.embed-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+.embed-grid.layout-beszel {
+  grid-template-columns: 1fr;
+}
+.embed-grid.layout-beszel #win-kuma {
+  display: none;
+}
+
+.embed-grid.layout-kuma {
+  grid-template-columns: 1fr;
+}
+.embed-grid.layout-kuma #win-beszel {
+  display: none;
+}
+
+.embed-window {
+  background: #080b11;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 540px;
+}
+
+body.mode-tablet.tab-windows .embed-window {
+  min-height: 0;
+  height: 100%;
+}
+
+.embed-win-head {
+  background: var(--card-noc);
+  border-bottom: 1px solid var(--line);
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.embed-win-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.win-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex-shrink: 0;
+}
+
+.win-dot.is-up {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+}
+
+.win-dot.is-down {
+  background: var(--crit);
+  box-shadow: 0 0 8px var(--crit);
+}
+
+.win-url {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.embed-win-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.win-btn {
+  background: var(--bg-noc);
+  border: 1px solid var(--line-strong);
+  color: var(--text-sub);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.win-btn:hover {
+  background: var(--ok);
+  color: #032217;
+  border-color: transparent;
+}
+
+.embed-frame-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: #0b0f17;
+}
+
+.embed-frame-wrap iframe {
+  width: 100%;
+  height: 100%;
+  min-height: 490px;
+  border: 0;
+  display: block;
+}
+
+body.mode-tablet.tab-windows .embed-frame-wrap iframe {
+  min-height: 0;
+  height: 100%;
+}
+
+.embed-hint {
+  background: rgba(56, 189, 248, 0.08);
+  border-top: 1px solid var(--line);
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.embed-hint code {
+  color: var(--cyan);
+  font-family: var(--font-mono);
+}
+
+/* ─── WUD UPDATE TRACKER ─── */
+.wud-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.wud-card {
+  background: var(--card-noc);
+  border: 1px solid var(--warn-border);
+  border-left: 5px solid var(--warn);
+  border-radius: var(--radius-card);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wud-card.is-major {
+  border-color: var(--crit-border);
+  border-left-color: var(--crit);
+  background: var(--crit-bg);
+}
+
+.wud-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.wud-name {
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 21px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.wud-badges {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.wud-diff-pill {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: #1c1100;
+}
+
+.wud-card.is-major .wud-diff-pill {
+  background: var(--crit);
+  color: #ffffff;
+}
+
+.wud-db-pill {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.22);
+  color: #fca5a5;
+  border: 1px solid var(--crit-border);
+}
+
+.wud-image {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.wud-version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: rgba(11, 15, 23, 0.65);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+.wud-ver-old { color: var(--text-muted); }
+.wud-ver-new { color: #fbbf24; font-weight: 700; }
+
+.wud-empty-card {
+  grid-column: 1 / -1;
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-border);
+  color: #34d399;
+  border-radius: var(--radius-card);
+  padding: 14px 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.wud-empty-card.is-warn {
+  background: var(--card-noc);
+  border-color: var(--line-strong);
+  color: var(--text-sub);
+}
+
+/* ─── QUICK-ACCESS BAR ─── */
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr));
+  gap: 10px;
+}
+
+.quick-card {
+  background: var(--card-noc);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: transform 0.15s ease, border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.quick-card:hover {
+  transform: translate3d(0, -1px, 0);
+  border-color: var(--cyan);
+  background: var(--card-noc-hover);
+}
+
+.quick-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.quick-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--text-main);
+}
+
+.quick-port {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--cyan);
+}
+
+.quick-tag {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ─── GRAFANA & PROMETHEUS BLUEPRINT VIEW ─── */
 .blueprint-view {
   display: none;
   flex-direction: column;
@@ -965,7 +1387,7 @@ body.view-blueprint .noc-grid-view {
   padding-bottom: 40px;
 }
 
-body.view-blueprint .blueprint-view {
+body.tab-blueprint .blueprint-view {
   display: flex;
 }
 
@@ -1179,9 +1601,11 @@ body.view-blueprint .blueprint-view {
   .services-matrix {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-  .container-row-grid {
+  .container-row-grid,
+  .container-row-grid--wud {
     grid-template-columns: repeat(2, 1fr);
   }
+  .embed-grid,
   .bp-grid-2,
   .bp-grid-3 {
     grid-template-columns: 1fr;

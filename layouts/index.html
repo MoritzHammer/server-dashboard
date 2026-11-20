@@ -3,10 +3,11 @@
 <head>
   {{- partial "head.html" . -}}
 </head>
-<body class="view-noc">
+<body class="mode-tablet tab-noc">
   <div class="noc-shell">
     {{- partial "topbar.html" . -}}
     {{- partial "noc_monitor.html" . -}}
+    {{- partial "live_embeds.html" . -}}
     {{- partial "blueprint.html" . -}}
   </div>
   <script src="/js/main.js" defer></script>

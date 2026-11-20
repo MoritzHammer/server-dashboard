@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -30,6 +31,7 @@ type DashboardPayload struct {
 	Timestamp        string          `json:"timestamp"`
 	PollIntervalSec  int             `json:"poll_interval_sec"`
 	Hostname         string          `json:"hostname"`
+	HostIP           string          `json:"host_ip"`
 	UptimeHuman      string          `json:"uptime_human"`
 	Sources          []string        `json:"sources"`
 	Verdict          VerdictInfo     `json:"verdict"`
@@ -37,6 +39,9 @@ type DashboardPayload struct {
 	CriticalServices []ServiceStatus `json:"critical_services"`
 	Infrastructure   InfraStatus     `json:"infrastructure"`
 	ContainerHealth  ContainerHealth `json:"container_health"`
+	WUD              WUDSnapshot     `json:"wud"`
+	Beszel           BeszelSnapshot  `json:"beszel"`
+	Embeds           EmbedConfig     `json:"embeds"`
 	Incidents        []IncidentItem  `json:"incidents"`
 }
 
@@ -108,6 +113,54 @@ type ContainerHealth struct {
 	TopRestarts []RestartEntry `json:"top_restarts"`
 }
 
+type WUDUpdateItem struct {
+	Container   string `json:"container"`
+	Image       string `json:"image"`
+	CurrentTag  string `json:"current_tag"`
+	NewTag      string `json:"new_tag"`
+	SemverDiff  string `json:"semver_diff"` // "major", "minor", "patch", "digest", ""
+	CautionDB   bool   `json:"caution_db"`
+	ReleaseLink string `json:"release_link,omitempty"`
+}
+
+type WUDSnapshot struct {
+	Available        bool            `json:"available"`
+	URL              string          `json:"url"`
+	TotalWatched     int             `json:"total_watched"`
+	UpdatesAvailable int             `json:"updates_available"`
+	Updates          []WUDUpdateItem `json:"updates"`
+	Error            string          `json:"error,omitempty"`
+}
+
+type BeszelHostItem struct {
+	Name   string  `json:"name"`
+	Host   string  `json:"host"`
+	Status string  `json:"status"` // "up", "down", "paused"
+	CPU    float64 `json:"cpu"`
+	Mem    float64 `json:"mem"`
+	Disk   float64 `json:"disk"`
+	Temp   float64 `json:"temp"`
+}
+
+type BeszelSnapshot struct {
+	Available bool             `json:"available"`
+	Reachable bool             `json:"reachable"`
+	URL       string           `json:"url"`
+	Online    int              `json:"online"`
+	Total     int              `json:"total"`
+	Hosts     []BeszelHostItem `json:"hosts"`
+}
+
+type EmbedConfig struct {
+	BeszelURL    string `json:"beszel_url"`
+	BeszelOnline bool   `json:"beszel_online"`
+	KumaURL      string `json:"kuma_url"`
+	KumaOnline   bool   `json:"kuma_online"`
+	WUDURL       string `json:"wud_url"`
+	WUDOnline    bool   `json:"wud_online"`
+	DozzleURL    string `json:"dozzle_url"`
+}
+
 type IncidentItem struct {
 	Level string `json:"level"` // "crit", "warn", "info"
 	Badge string `json:"badge"`
@@ -133,6 +186,7 @@ type HostDef struct {
 type Config struct {
 	ListenAddr       string
 	PublicDir        string
+	HostIP           string
 	PollInterval     time.Duration
 	DockerSocket     string
 	ProcDir          string
@@ -143,8 +197,17 @@ type Config struct {
 	Hosts            []HostDef
 	SSLDomains       []string
 	UptimeKumaURL    string
+	UptimeKumaEmbed  string
 	UptimeKumaKey    string
 	UptimeKumaSlug   string
+	BeszelURL        string
+	BeszelEmbed      string
+	BeszelEmail      string
+	BeszelPassword   string
+	WUDURL           string
+	WUDUser          string
+	WUDPass          string
+	DozzleURL        string
 	PrometheusURL    string
 }
 
@@ -212,6 +275,7 @@ func parseCSV(raw string) []string {
 }
 
 func loadConfig() Config {
+	hostIP := envOr("HOST_IP", "192.168.178.90")
 	pollSec := 10
 	if v, err := strconv.Atoi(envOr("POLL_INTERVAL", "10")); err == nil && v >= 3 && v <= 120 {
 		pollSec = v
@@ -227,13 +291,14 @@ func loadConfig() Config {
 		rootfs = "/"
 	}
 
+	// Only real services actually running in Moritz's homelab (no Gitea, no Traefik)
 	defaultCrit := strings.Join([]string{
-		"Vaultwarden|Passwort-Tresor|http://192.168.178.90:8081",
-		"Immich|Foto-Cloud|http://192.168.178.90:2283",
-		"Paperless|Dokumente|http://192.168.178.90:8000",
-		"Nginx Proxy|Edge Proxy & TLS|http://192.168.178.90:81",
-		"Uptime Kuma|Monitoring|http://192.168.178.90:3001",
-		"Website|info.moritzhammer.org|http://192.168.178.90:8080",
+		fmt.Sprintf("Vaultwarden|Passwort-Manager|http://%s:8081", hostIP),
+		fmt.Sprintf("Immich|Fotoverwaltung|http://%s:2283", hostIP),
+		fmt.Sprintf("Paperless-ngx|Dokumente|http://%s:8000", hostIP),
+		fmt.Sprintf("Nginx Proxy Manager|Reverse Proxy & SSL|http://%s:81", hostIP),
+		fmt.Sprintf("Uptime Kuma|Monitoring|http://%s:3001", hostIP),
+		fmt.Sprintf("Website|info.moritzhammer.org|http://%s:8080", hostIP),
 	}, ",")
 
 	sslRaw := envOr("SSL_DOMAINS", "info.moritzhammer.org")
@@ -242,9 +307,26 @@ func loadConfig() Config {
 		sslDomains = parseCSV(sslRaw)
 	}
 
+	kumaURL := strings.TrimRight(envOr("UPTIME_KUMA_URL", fmt.Sprintf("http://%s:3001", hostIP)), "/")
+	kumaSlug := envOr("UPTIME_KUMA_STATUS_SLUG", "")
+	kumaEmbed := strings.TrimRight(envOr("UPTIME_KUMA_EMBED_URL", ""), "/")
+	if kumaEmbed == "" {
+		if kumaSlug != "" {
+			kumaEmbed = kumaURL + "/status/" + kumaSlug
+		} else {
+			kumaEmbed = kumaURL
+		}
+	}
+
+	beszelURL := strings.TrimRight(envOr("BESZEL_URL", fmt.Sprintf("http://%s:8090", hostIP)), "/")
+	beszelEmbed := strings.TrimRight(envOr("BESZEL_EMBED_URL", beszelURL), "/")
+	wudURL := strings.TrimRight(envOr("WUD_URL", ""), "/")
+	dozzleURL := strings.TrimRight(envOr("DOZZLE_URL", fmt.Sprintf("http://%s:8888", hostIP)), "/")
+
 	return Config{
 		ListenAddr:       envOr("LISTEN_ADDR", ":80"),
 		PublicDir:        envOr("PUBLIC_DIR", "/srv/public"),
+		HostIP:           hostIP,
 		PollInterval:     time.Duration(pollSec) * time.Second,
 		DockerSocket:     envOr("DOCKER_SOCKET", "/var/run/docker.sock"),
 		ProcDir:          procDir,
@@ -254,9 +336,18 @@ func loadConfig() Config {
 		ExtraServices:    parseServices(envOr("EXTRA_SERVICES", "")),
 		Hosts:            parseHosts(envOr("HOSTS", "Docker-Host|local")),
 		SSLDomains:       sslDomains,
-		UptimeKumaURL:    strings.TrimRight(envOr("UPTIME_KUMA_URL", ""), "/"),
+		UptimeKumaURL:    kumaURL,
+		UptimeKumaEmbed:  kumaEmbed,
 		UptimeKumaKey:    envOr("UPTIME_KUMA_API_KEY", ""),
-		UptimeKumaSlug:   envOr("UPTIME_KUMA_STATUS_SLUG", ""),
+		UptimeKumaSlug:   kumaSlug,
+		BeszelURL:        beszelURL,
+		BeszelEmbed:      beszelEmbed,
+		BeszelEmail:      envOr("BESZEL_EMAIL", ""),
+		BeszelPassword:   envOr("BESZEL_PASSWORD", ""),
+		WUDURL:           wudURL,
+		WUDUser:          envOr("WUD_USER", ""),
+		WUDPass:          envOr("WUD_PASS", ""),
+		DozzleURL:        dozzleURL,
 		PrometheusURL:    strings.TrimRight(envOr("PROMETHEUS_URL", ""), "/"),
 	}
 }
@@ -341,7 +432,7 @@ func (s *SystemSampler) readCPU() (cpuSample, error) {
 			}
 			idle := vals[3]
 			if len(vals) > 4 {
-				idle += vals[4] // iowait
+				idle += vals[4]
 			}
 			return cpuSample{idle: idle, total: total}, nil
 		}
@@ -581,13 +672,21 @@ func formatRate(mbps float64) string {
 	return fmt.Sprintf("%.1f Mbit/s", mbps)
 }
 
-// ─── DOCKER ENGINE SOCKET CLIENT ───
+// ─── DOCKER ENGINE SOCKET CLIENT (+ AUTO-DISCOVERY FOR WUD / BESZEL / KUMA) ───
+
+type dockerPort struct {
+	PrivatePort int    `json:"PrivatePort"`
+	PublicPort  int    `json:"PublicPort"`
+	Type        string `json:"Type"`
+}
 
 type dockerContainerSummary struct {
 	ID     string            `json:"Id"`
 	Names  []string          `json:"Names"`
+	Image  string            `json:"Image"`
 	State  string            `json:"State"`
 	Status string            `json:"Status"`
+	Ports  []dockerPort      `json:"Ports"`
 	Labels map[string]string `json:"Labels"`
 }
 
@@ -617,9 +716,11 @@ type DockerSnapshot struct {
 	OOMNames        []string
 	RunningByName   map[string]bool
 	UnhealthyByName map[string]bool
+	DiscoveredWUD   string
+	DiscoveredBesz  string
 }
 
-func collectDocker(socketPath string) DockerSnapshot {
+func collectDocker(socketPath, hostIP string) DockerSnapshot {
 	snap := DockerSnapshot{
 		TopRestarts:     []RestartEntry{},
 		RunningByName:   map[string]bool{},
@@ -639,7 +740,6 @@ func collectDocker(socketPath string) DockerSnapshot {
 		},
 	}
 
-	// Host info
 	if resp, err := client.Get("http://docker/info"); err == nil {
 		var info struct {
 			Name string `json:"Name"`
@@ -664,7 +764,34 @@ func collectDocker(socketPath string) DockerSnapshot {
 	}
 	snap.Available = true
 
-	// Parallel inspect with worker pool of 8
+	// Auto-discover published host port for WUD and Beszel if running
+	for _, c := range list {
+		if strings.ToLower(c.State) != "running" {
+			continue
+		}
+		img := strings.ToLower(c.Image)
+		cname := ""
+		if len(c.Names) > 0 {
+			cname = strings.ToLower(strings.TrimPrefix(c.Names[0], "/"))
+		}
+		if snap.DiscoveredWUD == "" && (strings.Contains(img, "wud") || strings.Contains(img, "whats-up-docker") || cname == "wud") {
+			for _, p := range c.Ports {
+				if p.PublicPort > 0 && p.Type == "tcp" {
+					snap.DiscoveredWUD = fmt.Sprintf("http://%s:%d", hostIP, p.PublicPort)
+					break
+				}
+			}
+		}
+		if snap.DiscoveredBesz == "" && strings.Contains(img, "beszel") && !strings.Contains(img, "agent") {
+			for _, p := range c.Ports {
+				if p.PublicPort > 0 && p.Type == "tcp" {
+					snap.DiscoveredBesz = fmt.Sprintf("http://%s:%d", hostIP, p.PublicPort)
+					break
+				}
+			}
+		}
+	}
+
 	type res struct {
 		sum dockerContainerSummary
 		ins *dockerContainerInspect
@@ -694,7 +821,7 @@ func collectDocker(socketPath string) DockerSnapshot {
 	}
 	wg.Wait()
 
-	var restartsList []RestartEntry
+	restartsList := make([]RestartEntry, 0)
 	for _, item := range results {
 		name := "container"
 		if len(item.sum.Names) > 0 {
@@ -768,18 +895,294 @@ func collectDocker(socketPath string) DockerSnapshot {
 	return snap
 }
 
-// ─── UPTIME KUMA METRICS CLIENT (OPTIONAL) ───
+// ─── WUD (WHAT'S UP DOCKER) LIVE API CLIENT ───
+
+type wudAPIContainer struct {
+	Name            string `json:"name"`
+	UpdateAvailable bool   `json:"updateAvailable"`
+	Image           struct {
+		Name string `json:"name"`
+		Tag  struct {
+			Value string `json:"value"`
+		} `json:"tag"`
+	} `json:"image"`
+	UpdateKind struct {
+		Kind        string `json:"kind"`
+		LocalValue  string `json:"localValue"`
+		RemoteValue string `json:"remoteValue"`
+		SemverDiff  string `json:"semverDiff"`
+	} `json:"updateKind"`
+	Result struct {
+		Tag  string `json:"tag"`
+		Link string `json:"link"`
+	} `json:"result"`
+}
+
+func isDatabaseSensitiveApp(name, image string) bool {
+	s := strings.ToLower(name + " " + image)
+	for _, kw := range []string{"immich", "paperless", "vaultwarden", "authelia", "nginx", "postgres", "mariadb", "mysql", "redis"} {
+		if strings.Contains(s, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func collectWUD(wudURL, user, pass string) WUDSnapshot {
+	snap := WUDSnapshot{
+		URL:     wudURL,
+		Updates: []WUDUpdateItem{},
+	}
+	if wudURL == "" {
+		return snap
+	}
+
+	client := &http.Client{
+		Timeout: 4 * time.Second,
+		Transport: &http.Transport{
+			Proxy:           nil,
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	req, err := http.NewRequest("GET", wudURL+"/api/containers", nil)
+	if err != nil {
+		snap.Error = "Ungültige WUD_URL"
+		return snap
+	}
+	if user != "" || pass != "" {
+		req.SetBasicAuth(user, pass)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		snap.Error = "WUD nicht erreichbar"
+		return snap
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		snap.Error = "WUD erfordert Basic Auth (WUD_USER / WUD_PASS)"
+		return snap
+	}
+	if resp.StatusCode != 200 {
+		snap.Error = fmt.Sprintf("WUD HTTP %d", resp.StatusCode)
+		return snap
+	}
+
+	var items []wudAPIContainer
+	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
+		snap.Error = "WUD JSON ungültig"
+		return snap
+	}
+
+	snap.Available = true
+	snap.TotalWatched = len(items)
+	for _, c := range items {
+		if !c.UpdateAvailable {
+			continue
+		}
+		curTag := c.UpdateKind.LocalValue
+		if curTag == "" {
+			curTag = c.Image.Tag.Value
+		}
+		newTag := c.UpdateKind.RemoteValue
+		if newTag == "" {
+			newTag = c.Result.Tag
+		}
+		if newTag == "" {
+			newTag = "neuer Digest"
+		}
+		diff := strings.ToLower(c.UpdateKind.SemverDiff)
+		if diff == "" && strings.ToLower(c.UpdateKind.Kind) == "digest" {
+			diff = "digest"
+		}
+		snap.Updates = append(snap.Updates, WUDUpdateItem{
+			Container:   c.Name,
+			Image:       c.Image.Name,
+			CurrentTag:  curTag,
+			NewTag:      newTag,
+			SemverDiff:  diff,
+			CautionDB:   isDatabaseSensitiveApp(c.Name, c.Image.Name),
+			ReleaseLink: c.Result.Link,
+		})
+	}
+	snap.UpdatesAvailable = len(snap.Updates)
+
+	sort.Slice(snap.Updates, func(i, j int) bool {
+		rank := func(u WUDUpdateItem) int {
+			if u.SemverDiff == "major" {
+				return 0
+			}
+			if u.CautionDB {
+				return 1
+			}
+			if u.SemverDiff == "minor" {
+				return 2
+			}
+			return 3
+		}
+		ri, rj := rank(snap.Updates[i]), rank(snap.Updates[j])
+		if ri != rj {
+			return ri < rj
+		}
+		return snap.Updates[i].Container < snap.Updates[j].Container
+	})
+	return snap
+}
+
+// ─── BESZEL POCKETBASE LIVE CLIENT ───
+
+type BeszelClient struct {
+	mu       sync.Mutex
+	token    string
+	tokenExp time.Time
+}
+
+func (bc *BeszelClient) Collect(beszelURL, email, password string) BeszelSnapshot {
+	snap := BeszelSnapshot{
+		URL:   beszelURL,
+		Hosts: []BeszelHostItem{},
+	}
+	if beszelURL == "" {
+		return snap
+	}
+
+	client := &http.Client{
+		Timeout: 4 * time.Second,
+		Transport: &http.Transport{
+			Proxy:           nil,
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	// Quick reachability probe
+	if r, err := client.Get(beszelURL + "/api/health"); err == nil {
+		snap.Reachable = r.StatusCode < 500
+		r.Body.Close()
+	} else if r2, err2 := client.Get(beszelURL); err2 == nil {
+		snap.Reachable = r2.StatusCode < 500
+		r2.Body.Close()
+	}
+
+	if !snap.Reachable {
+		return snap
+	}
+
+	// If email + password provided, authenticate via PocketBase JWT and fetch systems
+	if email != "" && password != "" {
+		tok := bc.getToken(client, beszelURL, email, password, false)
+		if tok != "" {
+			items, ok := fetchBeszelSystems(client, beszelURL, tok)
+			if !ok {
+				// Retry once with fresh token
+				tok = bc.getToken(client, beszelURL, email, password, true)
+				if tok != "" {
+					items, ok = fetchBeszelSystems(client, beszelURL, tok)
+				}
+			}
+			if ok && len(items) > 0 {
+				snap.Available = true
+				snap.Hosts = items
+				snap.Total = len(items)
+				for _, h := range items {
+					if h.Status == "up" {
+						snap.Online++
+					}
+				}
+			}
+		}
+	}
+
+	return snap
+}
+
+func (bc *BeszelClient) getToken(client *http.Client, baseURL, email, password string, force bool) string {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	if !force && bc.token != "" && time.Now().Before(bc.tokenExp) {
+		return bc.token
+	}
+	payload, _ := json.Marshal(map[string]string{
+		"identity": email,
+		"password": password,
+	})
+	resp, err := client.Post(baseURL+"/api/collections/users/auth-with-password", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return ""
+	}
+	var out struct {
+		Token string `json:"token"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&out) == nil && out.Token != "" {
+		bc.token = out.Token
+		bc.tokenExp = time.Now().Add(6 * time.Hour)
+		return bc.token
+	}
+	return ""
+}
+
+func fetchBeszelSystems(client *http.Client, baseURL, token string) ([]BeszelHostItem, bool) {
+	req, err := http.NewRequest("GET", baseURL+"/api/collections/systems/records?perPage=50", nil)
+	if err != nil {
+		return nil, false
+	}
+	req.Header.Set("Authorization", token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, false
+	}
+	var out struct {
+		Items []struct {
+			Name   string `json:"name"`
+			Host   string `json:"host"`
+			Status string `json:"status"`
+			Info   struct {
+				CPU  float64 `json:"cpu"`
+				MP   float64 `json:"mp"`
+				DP   float64 `json:"dp"`
+				Temp float64 `json:"t"`
+			} `json:"info"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, false
+	}
+	hosts := make([]BeszelHostItem, 0, len(out.Items))
+	for _, it := range out.Items {
+		hosts = append(hosts, BeszelHostItem{
+			Name:   it.Name,
+			Host:   it.Host,
+			Status: strings.ToLower(it.Status),
+			CPU:    math.Round(it.Info.CPU*10) / 10,
+			Mem:    math.Round(it.Info.MP*10) / 10,
+			Disk:   math.Round(it.Info.DP*10) / 10,
+			Temp:   math.Round(it.Info.Temp*10) / 10,
+		})
+	}
+	return hosts, len(hosts) > 0
+}
+
+// ─── UPTIME KUMA METRICS CLIENT ───
 
 type KumaMonitor struct {
 	Name      string
-	Status    int     // 1 = up, 0 = down
-	LatencyMs float64 // -1 if unknown
-	CertDays  float64 // -1 if unknown
+	Status    int
+	LatencyMs float64
+	CertDays  float64
 	HasCert   bool
 }
 
 type KumaSnapshot struct {
 	Available bool
+	Reachable bool
 	Total     int
 	Online    int
 	Monitors  map[string]KumaMonitor
@@ -793,9 +1196,19 @@ func collectUptimeKuma(baseURL, apiKey, statusSlug string) KumaSnapshot {
 	if baseURL == "" {
 		return snap
 	}
-	client := &http.Client{Timeout: 4 * time.Second}
+	client := &http.Client{
+		Timeout: 4 * time.Second,
+		Transport: &http.Transport{
+			Proxy:           nil,
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
 
-	// Mode A: Prometheus /metrics endpoint (requires API key or public metrics)
+	if r, err := client.Get(baseURL); err == nil {
+		snap.Reachable = r.StatusCode < 500
+		r.Body.Close()
+	}
+
 	if apiKey != "" || statusSlug == "" {
 		req, err := http.NewRequest("GET", baseURL+"/metrics", nil)
 		if err == nil {
@@ -817,7 +1230,6 @@ func collectUptimeKuma(baseURL, apiKey, statusSlug string) KumaSnapshot {
 		}
 	}
 
-	// Mode B: Public Status Page JSON API
 	if statusSlug != "" {
 		if collectKumaStatusPage(client, baseURL, statusSlug, &snap) {
 			snap.Available = true
@@ -971,7 +1383,10 @@ func queryPrometheusScalar(baseURL, promql string) (float64, bool) {
 	if baseURL == "" {
 		return 0, false
 	}
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := &http.Client{
+		Timeout:   3 * time.Second,
+		Transport: &http.Transport{Proxy: nil},
+	}
 	u := baseURL + "/api/v1/query?query=" + url.QueryEscape(promql)
 	resp, err := client.Get(u)
 	if err != nil || resp.StatusCode != 200 {
@@ -1014,7 +1429,6 @@ func probeService(def ServiceDef, dockerSnap DockerSnapshot, kumaSnap KumaSnapsh
 		Target:   def.Target,
 	}
 
-	// If Uptime Kuma already monitors this exact service name, prefer its status
 	if kumaSnap.Available {
 		for kName, km := range kumaSnap.Monitors {
 			if strings.EqualFold(kName, def.Name) {
@@ -1083,10 +1497,10 @@ func probeService(def ServiceDef, dockerSnap DockerSnapshot, kumaSnap KumaSnapsh
 		return st
 	}
 
-	// Default: HTTP / HTTPS check
 	client := &http.Client{
 		Timeout: 3 * time.Second,
 		Transport: &http.Transport{
+			Proxy:           nil,
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -1128,8 +1542,11 @@ func probeHost(def HostDef) (bool, string) {
 		return true, "TCP OK"
 	}
 	client := &http.Client{
-		Timeout:   2500 * time.Millisecond,
-		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+		Timeout: 2500 * time.Millisecond,
+		Transport: &http.Transport{
+			Proxy:           nil,
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
 	}
 	resp, err := client.Get(def.Target)
 	if err != nil {
@@ -1170,6 +1587,7 @@ func checkSSLDomain(domain string) SSLCheckResult {
 type LiveCollector struct {
 	cfg     Config
 	sampler *SystemSampler
+	beszel  *BeszelClient
 	mu      sync.RWMutex
 	latest  DashboardPayload
 }
@@ -1178,6 +1596,7 @@ func NewLiveCollector(cfg Config) *LiveCollector {
 	return &LiveCollector{
 		cfg:     cfg,
 		sampler: NewSystemSampler(cfg.ProcDir, cfg.RootFSPath, cfg.NetInterface),
+		beszel:  &BeszelClient{},
 	}
 }
 
@@ -1216,10 +1635,10 @@ func (lc *LiveCollector) refresh() {
 	var sources []string
 	var incidents []IncidentItem
 
-	// 1. Docker Engine live metrics
-	dockerSnap := collectDocker(lc.cfg.DockerSocket)
+	// 1. Docker Engine live metrics (+ auto-discovery for WUD / Beszel)
+	dockerSnap := collectDocker(lc.cfg.DockerSocket, lc.cfg.HostIP)
 	if dockerSnap.Available {
-		sources = append(sources, "Docker Socket")
+		sources = append(sources, "Docker Engine")
 	}
 
 	// 2. Host system metrics (/proc)
@@ -1229,21 +1648,79 @@ func (lc *LiveCollector) refresh() {
 	}
 	sources = append(sources, "Host /proc")
 
-	// 3. Optional Uptime Kuma & Prometheus
-	kumaSnap := collectUptimeKuma(lc.cfg.UptimeKumaURL, lc.cfg.UptimeKumaKey, lc.cfg.UptimeKumaSlug)
+	// Resolve WUD and Beszel URLs (explicit ENV > Docker auto-discovery)
+	wudURL := lc.cfg.WUDURL
+	if wudURL == "" {
+		wudURL = dockerSnap.DiscoveredWUD
+	}
+	beszelURL := lc.cfg.BeszelURL
+	if beszelURL == "" && dockerSnap.DiscoveredBesz != "" {
+		beszelURL = dockerSnap.DiscoveredBesz
+	}
+	beszelEmbed := lc.cfg.BeszelEmbed
+	if beszelEmbed == "" {
+		beszelEmbed = beszelURL
+	}
+
+	// 3. Parallel collection: Uptime Kuma, Beszel, WUD, Prometheus, Services, Hosts, SSL
+	var (
+		kumaSnap   KumaSnapshot
+		beszelSnap BeszelSnapshot
+		wudSnap    WUDSnapshot
+		promActive bool
+		promUp     float64
+		promAll    float64
+	)
+
+	critResults := make([]ServiceStatus, len(lc.cfg.CriticalServices))
+	extraResults := make([]ServiceStatus, len(lc.cfg.ExtraServices))
+	type hostRes struct {
+		name   string
+		online bool
+		detail string
+	}
+	hostResults := make([]hostRes, len(lc.cfg.Hosts))
+	sslResults := make([]SSLCheckResult, len(lc.cfg.SSLDomains))
+
+	var preWg sync.WaitGroup
+	preWg.Add(4)
+	go func() {
+		defer preWg.Done()
+		kumaSnap = collectUptimeKuma(lc.cfg.UptimeKumaURL, lc.cfg.UptimeKumaKey, lc.cfg.UptimeKumaSlug)
+	}()
+	go func() {
+		defer preWg.Done()
+		beszelSnap = lc.beszel.Collect(beszelURL, lc.cfg.BeszelEmail, lc.cfg.BeszelPassword)
+	}()
+	go func() {
+		defer preWg.Done()
+		wudSnap = collectWUD(wudURL, lc.cfg.WUDUser, lc.cfg.WUDPass)
+	}()
+	go func() {
+		defer preWg.Done()
+		u, ok1 := queryPrometheusScalar(lc.cfg.PrometheusURL, "count(up == 1)")
+		a, ok2 := queryPrometheusScalar(lc.cfg.PrometheusURL, "count(up)")
+		if ok1 && ok2 && a > 0 {
+			promActive = true
+			promUp = u
+			promAll = a
+		}
+	}()
+	preWg.Wait()
+
 	if kumaSnap.Available {
 		sources = append(sources, "Uptime Kuma")
 	}
-	promActive := false
-	promHostsUp, okUp := queryPrometheusScalar(lc.cfg.PrometheusURL, "count(up == 1)")
-	promHostsAll, okAll := queryPrometheusScalar(lc.cfg.PrometheusURL, "count(up)")
-	if okUp && okAll && promHostsAll > 0 {
-		promActive = true
+	if beszelSnap.Available {
+		sources = append(sources, "Beszel")
+	}
+	if wudSnap.Available {
+		sources = append(sources, "WUD")
+	}
+	if promActive {
 		sources = append(sources, "Prometheus")
 	}
 
-	// 4. Probe Critical Services in parallel
-	critResults := make([]ServiceStatus, len(lc.cfg.CriticalServices))
 	var wg sync.WaitGroup
 	for i, sdef := range lc.cfg.CriticalServices {
 		wg.Add(1)
@@ -1252,9 +1729,6 @@ func (lc *LiveCollector) refresh() {
 			critResults[idx] = probeService(sd, dockerSnap, kumaSnap)
 		}(i, sdef)
 	}
-
-	// Probe Extra Services
-	extraResults := make([]ServiceStatus, len(lc.cfg.ExtraServices))
 	for i, sdef := range lc.cfg.ExtraServices {
 		wg.Add(1)
 		go func(idx int, sd ServiceDef) {
@@ -1262,14 +1736,6 @@ func (lc *LiveCollector) refresh() {
 			extraResults[idx] = probeService(sd, dockerSnap, kumaSnap)
 		}(i, sdef)
 	}
-
-	// Probe Hosts
-	type hostRes struct {
-		name   string
-		online bool
-		detail string
-	}
-	hostResults := make([]hostRes, len(lc.cfg.Hosts))
 	for i, hdef := range lc.cfg.Hosts {
 		wg.Add(1)
 		go func(idx int, hd HostDef) {
@@ -1278,9 +1744,6 @@ func (lc *LiveCollector) refresh() {
 			hostResults[idx] = hostRes{name: hd.Name, online: ok, detail: det}
 		}(i, hdef)
 	}
-
-	// Check SSL Domains
-	sslResults := make([]SSLCheckResult, len(lc.cfg.SSLDomains))
 	for i, dom := range lc.cfg.SSLDomains {
 		wg.Add(1)
 		go func(idx int, d string) {
@@ -1294,10 +1757,8 @@ func (lc *LiveCollector) refresh() {
 		sources = append(sources, "Live TLS")
 	}
 
-	// ─── COMPUTE EXECUTIVE SUMMARY (ZEILE 1) ───
-	// Panel 1: Dienste online
-	svcOnline := 0
-	svcTotal := 0
+	// ─── ZEILE 1: EXECUTIVE SUMMARY ───
+	svcOnline, svcTotal := 0, 0
 	svcSource := "Live-Probe"
 	if kumaSnap.Available {
 		svcOnline = kumaSnap.Online
@@ -1327,13 +1788,28 @@ func (lc *LiveCollector) refresh() {
 		svcSub = fmt.Sprintf("%d Dienst(e) OFFLINE", svcTotal-svcOnline)
 	}
 
-	// Panel 2: Hosts online
-	hostsOnline := 0
-	hostsTotal := 0
+	// Hosts online: Beszel > Prometheus > Host-Check
+	hostsOnline, hostsTotal := 0, 0
 	hostSource := "Host-Check"
-	if promActive {
-		hostsOnline = int(promHostsUp)
-		hostsTotal = int(promHostsAll)
+	if beszelSnap.Available {
+		hostsOnline = beszelSnap.Online
+		hostsTotal = beszelSnap.Total
+		hostSource = "Beszel"
+		for _, h := range beszelSnap.Hosts {
+			if h.Status != "up" {
+				incidents = append(incidents, IncidentItem{
+					Level: "crit",
+					Badge: "KRITISCH",
+					Title: fmt.Sprintf("Host offline · %s", h.Name),
+					Meta:  fmt.Sprintf("Beszel · Status: %s (%s)", h.Status, h.Host),
+					Time:  "AKTIV",
+					Rank:  1,
+				})
+			}
+		}
+	} else if promActive {
+		hostsOnline = int(promUp)
+		hostsTotal = int(promAll)
 		hostSource = "Prometheus"
 	} else {
 		for _, h := range hostResults {
@@ -1359,7 +1835,7 @@ func (lc *LiveCollector) refresh() {
 		hostSub = fmt.Sprintf("%d Host(s) nicht erreichbar", hostsTotal-hostsOnline)
 	}
 
-	// Panel 3: Container healthy
+	// Container healthy
 	cntValue := "n/a"
 	cntStatus := "warn"
 	cntSub := "Docker Socket (/var/run/docker.sock) nicht gemountet"
@@ -1374,7 +1850,7 @@ func (lc *LiveCollector) refresh() {
 		}
 	}
 
-	// Panel 4: SSL-Zertifikate
+	// SSL-Zertifikate
 	sslValue := "OK"
 	sslStatus := "ok"
 	sslSource := "Live TLS"
@@ -1433,9 +1909,6 @@ func (lc *LiveCollector) refresh() {
 				Time:  fmt.Sprintf("%dd Rest", minSSL),
 				Rank:  5,
 			})
-		} else {
-			sslValue = "OK"
-			sslStatus = "ok"
 		}
 	}
 
@@ -1455,7 +1928,7 @@ func (lc *LiveCollector) refresh() {
 		}
 	}
 
-	// ─── INFRASTRUCTURE GAUGES (ZEILE 3) ───
+	// ─── INFRASTRUCTURE GAUGES ───
 	cpuSt, cpuTag := thresholdState(cpu, 70, 85)
 	ramSt, ramTag := thresholdState(ramPct, 75, 90)
 	diskSt, diskTag := thresholdState(diskPct, 80, 90)
@@ -1476,7 +1949,7 @@ func (lc *LiveCollector) refresh() {
 		incidents = append(incidents, IncidentItem{Level: "warn", Badge: "WARNUNG", Title: fmt.Sprintf("Datenträger über Warnschwelle (%.0f %%)", diskPct), Meta: diskDetail + " · Bereich 80–90 %", Time: "AKTIV", Rank: 4})
 	}
 
-	// ─── CONTAINER HEALTH INCIDENTS (ZEILE 4) ───
+	// ─── CONTAINER & WUD INCIDENTS ───
 	for _, uname := range dockerSnap.UnhealthyNames {
 		incidents = append(incidents, IncidentItem{
 			Level: "crit",
@@ -1497,8 +1970,22 @@ func (lc *LiveCollector) refresh() {
 			Rank:  5,
 		})
 	}
+	if wudSnap.Available && wudSnap.UpdatesAvailable > 0 {
+		names := make([]string, 0, minInt(3, len(wudSnap.Updates)))
+		for i := 0; i < minInt(3, len(wudSnap.Updates)); i++ {
+			names = append(names, wudSnap.Updates[i].Container)
+		}
+		incidents = append(incidents, IncidentItem{
+			Level: "warn",
+			Badge: "UPDATE",
+			Title: fmt.Sprintf("WUD: %d Container-Update(s) verfügbar", wudSnap.UpdatesAvailable),
+			Meta:  fmt.Sprintf("Betroffen: %s · Details im Tab WUD Updates", strings.Join(names, ", ")),
+			Time:  "WUD",
+			Rank:  6,
+		})
+	}
 
-	// Calm operational info items when nominal (fill up to max 4 items)
+	// Calm operational info items when nominal
 	if len(incidents) < 4 {
 		if minSSL < 9999 && minSSL > 21 {
 			incidents = append(incidents, IncidentItem{
@@ -1507,6 +1994,16 @@ func (lc *LiveCollector) refresh() {
 				Title: fmt.Sprintf("SSL-Zertifikate gültig (noch %d Tage)", minSSL),
 				Meta:  fmt.Sprintf("%s · Kürzeste Laufzeit: %s", sslSource, minSSLDom),
 				Time:  "OK",
+				Rank:  8,
+			})
+		}
+		if wudSnap.Available && wudSnap.UpdatesAvailable == 0 {
+			incidents = append(incidents, IncidentItem{
+				Level: "info",
+				Badge: "INFO",
+				Title: fmt.Sprintf("WUD: Alle %d überwachten Container aktuell", wudSnap.TotalWatched),
+				Meta:  "What's Up Docker · Keine ausstehenden Image-Updates",
+				Time:  "AKTUELL",
 				Rank:  8,
 			})
 		}
@@ -1567,6 +2064,7 @@ func (lc *LiveCollector) refresh() {
 		Timestamp:       time.Now().Format(time.RFC3339),
 		PollIntervalSec: int(lc.cfg.PollInterval.Seconds()),
 		Hostname:        hostName,
+		HostIP:          lc.cfg.HostIP,
 		UptimeHuman:     uptimeStr,
 		Sources:         sources,
 		Verdict:         verdict,
@@ -1594,6 +2092,17 @@ func (lc *LiveCollector) refresh() {
 			Total:       dockerSnap.Total,
 			Restarts:    dockerSnap.Restarts,
 			TopRestarts: dockerSnap.TopRestarts,
+		},
+		WUD:    wudSnap,
+		Beszel: beszelSnap,
+		Embeds: EmbedConfig{
+			BeszelURL:    beszelEmbed,
+			BeszelOnline: beszelSnap.Reachable,
+			KumaURL:      lc.cfg.UptimeKumaEmbed,
+			KumaOnline:   kumaSnap.Reachable,
+			WUDURL:       wudURL,
+			WUDOnline:    wudSnap.Available,
+			DozzleURL:    lc.cfg.DozzleURL,
 		},
 		Incidents: incidents,
 	}
@@ -1691,8 +2200,8 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("NOC Live Server listening on %s (public=%s, proc=%s, docker=%s, poll=%s)",
-		cfg.ListenAddr, cfg.PublicDir, cfg.ProcDir, cfg.DockerSocket, cfg.PollInterval)
+	log.Printf("NOC Live Server listening on %s (public=%s, host=%s, proc=%s, docker=%s)",
+		cfg.ListenAddr, cfg.PublicDir, cfg.HostIP, cfg.ProcDir, cfg.DockerSocket)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}

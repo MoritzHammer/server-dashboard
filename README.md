@@ -1,27 +1,24 @@
 # Homelab Live NOC Server Dashboard (Hugo + Go Live Collector)
 
-Produktionsreifes **Live Network Operations Center (NOC) Dashboard** für ein Selfhosting-Homelab, optimiert für den 24/7-Dauerbetrieb auf einem **8–10 Zoll Android-Tablet im Kiosk-Modus**.
+Produktionsreifes **Live Network Operations Center (NOC) Dashboard** speziell für dein Homelab (`192.168.178.90`), umschaltbar zwischen **Tablet-Kiosk-Modus** (`100dvh`, kein Scrollen) und **Desktop-Vollansicht** (inkl. eingebetteter Live-Fenster für **Beszel** & **Uptime Kuma**, **WUD Update-Tracker** und Schnellzugriff).
 
-- **Frontend:** Generiert mit **[Hugo (`gohugo.io`)](https://gohugo.io)** im Editorial-Design von `info.moritzhammer.org` (lokal gehostete `.woff2`-Schriften, 100 % DSGVO-konform, 0 externe Requests).
-- **Live-Backend:** Eingebetteter, abhängigkeitsfreier **Go-Server** (`cmd/noc-server/main.go`), der das Hugo-Frontend ausliefert und unter **`/api/status`** alle 5–10 Sekunden echte Live-Daten liefert.
+- **Frontend:** Generiert mit **[Hugo (`gohugo.io`)](https://gohugo.io)** im Editorial-Design von `info.moritzhammer.org` (lokal gehostete `.woff2`-Schriften, 100 % DSGVO-konform).
+- **Live-Backend:** Eingebetteter, abhängigkeitsfreier **Go-Server** ([`cmd/noc-server/main.go`](cmd/noc-server/main.go)), der unter **`/api/status`** alle 5–10 Sekunden echte Live-Daten bereitstellt.
 
 ---
 
-## Echte Live-Datenquellen (Out-of-the-Box aktiv)
+## Features im Überblick
 
-1. **Docker Engine Socket (`/var/run/docker.sock:ro`)**
-   - Live-Zählung aller laufenden, gesunden (`healthy`) und fehlerhaften (`unhealthy` / `restarting` / `OOMKilled`) Container.
-   - Echte `RestartCount`-Werte inkl. Top-Restart-Liste in Zeile 4.
-2. **Linux Host-Telemetrie (`/proc:/host/proc:ro` + Disk `statfs`)**
-   - Live-CPU-Auslastung & Load Average (Grün `< 70 %`, Gelb `70–85 %`, Rot `> 85 %`).
-   - Live-Arbeitsspeicher in % und GB (Grün `< 75 %`, Gelb `75–90 %`, Rot `> 90 %`).
-   - Live-Datenträgerbelegung in % und GB (Grün `< 80 %`, Gelb `80–90 %`, Rot `> 90 %`).
-   - Live-Netzwerkdurchsatz (Inbound / Outbound Mbit/s) inkl. rollender 16-Punkt-SVG-Sparkline.
-3. **Aktive Live-Probes (HTTP / HTTPS / TCP / Docker) & Live-TLS-SSL-Check**
-   - Prüft in Zeile 2 standardmäßig deine laufenden Dienste auf `192.168.178.90` (`Vaultwarden`, `Immich`, `Paperless`, `Nginx Proxy`, `Uptime Kuma`, `Website`) mit echter Latenz in Millisekunden.
-   - Prüft per echtem TLS-Handshake auf Port `443` die Restlaufzeit deiner SSL-Zertifikate (`info.moritzhammer.org`, `moritzhammer.de`, `hammermoritz.de`).
-4. **Optionale Anbindung an Uptime Kuma & Prometheus**
-   - Sobald `UPTIME_KUMA_URL` (+ `UPTIME_KUMA_API_KEY` oder `UPTIME_KUMA_STATUS_SLUG`) bzw. `PROMETHEUS_URL` in Portainer gesetzt werden, übernimmt das Dashboard automatisch die Werte direkt aus Uptime Kuma (`/metrics` bzw. Status-Page-API) und Prometheus (`up`).
+1. **Tablet- vs. Desktop-Modus (oben umschaltbar & gespeichert)**
+   - **Tablet (`100dvh` Kiosk):** Kompakte 5-Zeilen-Ansicht ohne Scrollen für 8–10 Zoll Android-Tablets + eigene Vollbild-Tabs für **Beszel & Kuma** und **WUD**.
+   - **Desktop (Vollansicht):** Alle 5 NOC-Zeilen plus direkt darunter die eingebetteten Live-Fenster (**Beszel** & **Uptime Kuma** nebeneinander oder einzeln), der **WUD Update-Tracker** und die **Homelab-Schnellzugriffsleiste**.
+2. **Nur deine echten Homelab-Dienste (`192.168.178.90`)**
+   - `Vaultwarden (:8081)`, `Immich (:2283)`, `Paperless-ngx (:8000)`, `Nginx Proxy Manager (:81)`, `Uptime Kuma (:3001)`, `Website (:8080)` sowie Schnellzugriff auf `Beszel (:8090)`, `Dozzle (:8888)` und `Filebrowser (:8082)`.
+3. **WUD (What's Up Docker) Live-Integration**
+   - Erkennt laufende WUD-Container automatisch über den Docker Socket (oder per `WUD_URL`), fragt `/api/containers` ab und listet verfügbare Updates inkl. Version-Diff (`MAJOR` / `MINOR` / `PATCH`) und **DB-Backup-Warnung** für datenbankkritische Apps (`Immich`, `Paperless-ngx`, `Vaultwarden`, `Authelia`, `Nginx Proxy Manager`).
+4. **Beszel & Uptime Kuma Live-Fenster + API**
+   - Zeigt Beszel (`http://192.168.178.90:8090`) und Uptime Kuma (`http://192.168.178.90:3001`) direkt als HTML-Fenster (Split-View / Einzelansicht / Reload / Extern öffnen).
+   - Optional über `BESZEL_EMAIL` + `BESZEL_PASSWORD` (PocketBase JWT) und `UPTIME_KUMA_API_KEY` / `UPTIME_KUMA_STATUS_SLUG` zusätzlich direkt in den Executive-Summary-Zahlen auswertbar.
 
 ---
 
@@ -31,18 +28,17 @@ Produktionsreifes **Live Network Operations Center (NOC) Dashboard** für ein Se
    - **Repository URL:** `https://github.com/MoritzHammer/server-dashboard`
    - **Repository reference:** `refs/heads/main`
    - **Compose path:** `docker-compose.yml`
-2. Optional unter **Environment variables** anpassen:
+   - *(Falls das Repo auf **Privat** gestellt wird: in Portainer unter **Authentication** GitHub-Username + GitHub Personal Access Token mit `Contents: Read-only` eintragen.)*
+2. Optionale Umgebungsvariablen in Portainer:
 
-| Variable | Beispiel / Standardwert |
+| Variable | Standard / Beispiel |
 | --- | --- |
-| `PORT` | `3000` (Host-Port) |
-| `POLL_INTERVAL` | `10` (Sekunden) |
-| `CRITICAL_SERVICES` | `Vaultwarden\|Passwort-Tresor\|http://192.168.178.90:8081,Immich\|Foto-Cloud\|http://192.168.178.90:2283,Home Assistant\|Smart Home\|http://192.168.178.90:8123,WireGuard\|VPN\|docker://wg-easy` |
-| `HOSTS` | `Docker-Host\|local,Proxmox\|tcp://192.168.178.10:8006` |
-| `SSL_DOMAINS` | `info.moritzhammer.org,moritzhammer.de,hammermoritz.de` |
-| `UPTIME_KUMA_URL` | `http://192.168.178.90:3001` |
-| `UPTIME_KUMA_API_KEY` | *(Optional: API-Key für `/metrics`)* |
-| `UPTIME_KUMA_STATUS_SLUG` | *(Alternativ: Slug einer öffentlichen Uptime-Kuma-Statusseite)* |
-| `PROMETHEUS_URL` | `http://192.168.178.90:9090` |
-
-> **Unterstützte Probe-Ziele für `CRITICAL_SERVICES`:** `http://...`, `https://...`, `tcp://ip:port` oder `docker://<container-name>` (prüft den laufenden & gesunden Docker-Container direkt über den Socket).
+| `PORT` | `3000` (Host-Port; falls z. B. `homepage_dashboard` Port `3000` nutzt, z. B. `3002` setzen) |
+| `BESZEL_URL` / `BESZEL_EMBED_URL` | `http://192.168.178.90:8090` (oder HTTPS-Domain bei Zugriff über NPM) |
+| `BESZEL_EMAIL` & `BESZEL_PASSWORD` | Optionaler Read-Only-Benutzer für native Beszel-Multi-Host-Metriken |
+| `UPTIME_KUMA_URL` / `UPTIME_KUMA_EMBED_URL` | `http://192.168.178.90:3001` (für Iframes in Kuma ggf. X-Frame-Options deaktivieren oder `UPTIME_KUMA_STATUS_SLUG` setzen) |
+| `UPTIME_KUMA_API_KEY` | Optional für `/metrics`-Auswertung |
+| `WUD_URL` | Automatische Port-Erkennung via Docker Socket oder manuell `http://192.168.178.90:<WUD-PORT>` |
+| `WUD_USER` & `WUD_PASS` | Optional, falls WUD Basic Auth nutzt |
+| `CRITICAL_SERVICES` | Überschreibt Zeile 2 (`Name\|Kategorie\|http(s)/tcp/docker://...`) |
+| `SSL_DOMAINS` | `info.moritzhammer.org` (Komma-separiert oder `none`) |

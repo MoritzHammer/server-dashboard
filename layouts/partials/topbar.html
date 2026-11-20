@@ -8,7 +8,7 @@
           </svg>
         </span>
         <span class="brand-title">MORITZ HAMMER · NOC</span>
-        <span class="brand-sub" id="topbar-host-sub">Live Operations Center</span>
+        <span class="brand-sub" id="topbar-host-sub">192.168.178.90</span>
       </div>
 
       <div class="global-verdict" id="global-verdict" role="status" aria-live="polite">
@@ -17,18 +17,28 @@
       </div>
 
       <div class="topbar-controls">
-        <div class="pill-group" role="group" aria-label="Datenmodus">
-          <button type="button" class="pill-btn sim-live" data-sim="live" id="btn-mode-live" aria-pressed="true" title="Echte Live-Daten vom Server (/api/status)">● Live</button>
-          <button type="button" class="pill-btn sim-warn" data-sim="warn" aria-pressed="false" title="Alarm-Test: Warnung simulieren">▲ Test-Warn</button>
-          <button type="button" class="pill-btn sim-crit" data-sim="crit" aria-pressed="false" title="Alarm-Test: Kritischen Ausfall simulieren">■ Test-Krit</button>
+        <!-- Tablet vs. Desktop Layout Switcher -->
+        <div class="pill-group" role="group" aria-label="Darstellungsmodus">
+          <button type="button" class="pill-btn mode-btn" id="btn-mode-tablet" data-layout="tablet" aria-pressed="true" title="8–10 Zoll Tablet-Kiosk (100dvh, kein Scrollen)">Tablet</button>
+          <button type="button" class="pill-btn mode-btn" id="btn-mode-desktop" data-layout="desktop" aria-pressed="false" title="Desktop-Vollansicht mit Live-Fenstern für Beszel, Kuma &amp; WUD">Desktop</button>
         </div>
 
-        <div class="pill-group" role="group" aria-label="Ansicht wechseln">
-          <button type="button" class="pill-btn" id="btn-view-noc" aria-pressed="true">NOC Kiosk</button>
-          <button type="button" class="pill-btn" id="btn-view-bp" aria-pressed="false">Grafana &amp; PromQL</button>
+        <!-- View Tabs (in Tablet mode switches full view; in Desktop mode jumps or switches to Blueprint) -->
+        <div class="pill-group" role="group" aria-label="Bereich wählen">
+          <button type="button" class="pill-btn" data-tab="noc" aria-pressed="true">NOC</button>
+          <button type="button" class="pill-btn" data-tab="windows" aria-pressed="false">Beszel &amp; Kuma</button>
+          <button type="button" class="pill-btn" data-tab="wud" aria-pressed="false" id="tab-btn-wud">WUD</button>
+          <button type="button" class="pill-btn" data-tab="blueprint" aria-pressed="false">Grafana</button>
         </div>
 
-        <button type="button" class="pill-btn" id="btn-kiosk-fs" aria-pressed="false" title="Kiosk-Vollbild &amp; Screen Wake-Lock aktivieren">⛶ Vollbild</button>
+        <!-- Live / Alarm-Test -->
+        <div class="pill-group" role="group" aria-label="Datenquelle">
+          <button type="button" class="pill-btn sim-live" data-sim="live" id="btn-mode-live" aria-pressed="true">● Live</button>
+          <button type="button" class="pill-btn sim-warn" data-sim="warn" aria-pressed="false" title="Alarm-Test Warnung">▲</button>
+          <button type="button" class="pill-btn sim-crit" data-sim="crit" aria-pressed="false" title="Alarm-Test Kritisch">■</button>
+        </div>
+
+        <button type="button" class="pill-btn" id="btn-kiosk-fs" aria-pressed="false" title="Vollbild &amp; Screen Wake-Lock">⛶</button>
 
         <div class="noc-clock-box">
           <span id="noc-clock">--:--:--</span>

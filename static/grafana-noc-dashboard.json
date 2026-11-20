@@ -173,14 +173,14 @@
     },
     {
       "id": 5,
-      "title": "ZEILE 2 · KRITISCHE DIENSTE (VAULTWARDEN · IMMICH · HOME ASSISTANT · GITEA · TRAEFIK · WIREGUARD)",
+      "title": "ZEILE 2 · KRITISCHE DIENSTE (VAULTWARDEN · IMMICH · PAPERLESS-NGX · NGINX PROXY · UPTIME KUMA · WEBSITE)",
       "type": "stat",
       "gridPos": { "h": 4, "w": 24, "x": 0, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
         {
           "refId": "A",
-          "expr": "monitor_status{job=\"uptime-kuma\", monitor_name=~\"Vaultwarden|Immich|Home Assistant|Gitea|Traefik|WireGuard\"}",
+          "expr": "monitor_status{job=\"uptime-kuma\", monitor_name=~\"Vaultwarden|Immich|Paperless-ngx|Nginx Proxy Manager|Uptime Kuma|Website\"}",
           "legendFormat": "{{monitor_name}}",
           "instant": true
         }
