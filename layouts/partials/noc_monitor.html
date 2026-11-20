@@ -8,7 +8,7 @@
             <span class="row-idx">ZEILE 01</span>
             <h2 class="row-title">Executive Summary</h2>
           </div>
-          <span class="row-source">Quellen: Uptime Kuma · Beszel · Dazzle</span>
+          <span class="row-source" id="row1-source">Quellen: Live-Probe · Docker Engine · Host /proc · Live TLS</span>
         </div>
 
         <div class="exec-grid">
@@ -32,12 +32,12 @@
             <span class="row-idx">ZEILE 02</span>
             <h2 class="row-title">Kritische Dienste</h2>
           </div>
-          <span class="row-source">Binäre Status-Matrix (Grün = Online · Rot = Offline · Klick zum Testen)</span>
+          <span class="row-source" id="row2-source">Binäre Live-Status-Matrix (Grün = Online · Rot = Offline)</span>
         </div>
 
-        <div class="services-matrix">
+        <div class="services-matrix" id="services-matrix">
           {{- range $noc.critical_services }}
-          <article class="svc-tile" data-svc-id="{{ .id }}" data-default-latency="{{ .latency }}" title="Klicken, um Ausfall von {{ .name }} zu simulieren">
+          <article class="svc-tile" data-svc-id="{{ .id }}" data-default-latency="{{ .latency }}">
             <div class="svc-head">
               <h3 class="svc-name">{{ .name }}</h3>
               <span class="svc-badge">✅ ONLINE</span>
@@ -58,7 +58,7 @@
             <span class="row-idx">ZEILE 03</span>
             <h2 class="row-title">Infrastrukturzustand</h2>
           </div>
-          <span class="row-source">Prometheus · Node Exporter · Beszel (Host {{ .Site.Params.host_ip }})</span>
+          <span class="row-source" id="row3-source">Host /proc · Live Telemetrie</span>
         </div>
 
         <div class="infra-grid">
@@ -79,12 +79,12 @@
           </article>
           {{- end }}
 
-          <!-- Netzwerk Inbound / Outbound + Sparkline -->
+          <!-- Netzwerk Inbound / Outbound + Live Sparkline -->
           {{- $net := $noc.infrastructure.network -}}
           <article class="gauge-card" data-gauge-id="net">
             <div class="gauge-top">
               <span class="gauge-label">{{ $net.label }}</span>
-              <span class="gauge-detail">{{ $net.source }}</span>
+              <span class="gauge-detail" id="net-iface-label">{{ $net.source }}</span>
             </div>
             <div class="net-rates">
               <div class="net-rate-item">
@@ -96,15 +96,15 @@
                 <span class="net-val net-val--out" id="net-out-val">{{ $net.outbound }}</span>
               </div>
             </div>
-            <svg class="net-spark" viewBox="0 0 240 26" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-              <polyline points="0,20 24,18 48,14 72,17 96,10 120,13 144,8 168,12 192,7 216,11 240,9" stroke="#08B4C4" stroke-width="2" fill="none"/>
-              <polyline points="0,23 24,22 48,20 72,21 96,18 120,19 144,17 168,19 192,16 216,18 240,17" stroke="#E2366E" stroke-width="1.8" fill="none"/>
+            <svg class="net-spark" id="net-spark-svg" viewBox="0 0 240 26" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <polyline id="spark-in" points="0,20 24,18 48,14 72,17 96,10 120,13 144,8 168,12 192,7 216,11 240,9" stroke="#08B4C4" stroke-width="2" fill="none"/>
+              <polyline id="spark-out" points="0,23 24,22 48,20 72,21 96,18 120,19 144,17 168,19 192,16 216,18 240,17" stroke="#E2366E" stroke-width="1.8" fill="none"/>
             </svg>
           </article>
         </div>
       </section>
 
-      <!-- ─── ZEILE 4: CONTAINER-GESUNDHEIT (QUELLE: DAZZLE) ─── -->
+      <!-- ─── ZEILE 4: CONTAINER-GESUNDHEIT (DOCKER ENGINE SOCKET) ─── -->
       {{- $ch := $noc.container_health -}}
       <section class="noc-row" aria-label="Zeile 4: Container-Gesundheit">
         <div class="row-header">
@@ -112,14 +112,14 @@
             <span class="row-idx">ZEILE 04</span>
             <h2 class="row-title">Container-Gesundheit</h2>
           </div>
-          <span class="row-source">Quelle: {{ $ch.source }}</span>
+          <span class="row-source" id="row4-source">Quelle: Docker Engine Socket (Live)</span>
         </div>
 
         <div class="container-row-grid">
           <article class="cnt-stat" id="cnt-healthy">
             <div class="cnt-meta">
               <span class="cnt-label">Healthy Container</span>
-              <span class="cnt-sub">Quelle: Dazzle · Status OK</span>
+              <span class="cnt-sub" id="cnt-healthy-sub">Docker Engine · Status OK</span>
             </div>
             <span class="cnt-num">{{ $ch.healthy }}</span>
           </article>
@@ -132,20 +132,20 @@
             <span class="cnt-num">{{ $ch.unhealthy }}</span>
           </article>
 
-          <article class="cnt-stat status-warn" id="cnt-restarts">
+          <article class="cnt-stat" id="cnt-restarts">
             <div class="cnt-meta">
-              <span class="cnt-label">Restarts (24h)</span>
-              <span class="cnt-sub">Container-Neustarts letzte 24h</span>
+              <span class="cnt-label">Container Restarts</span>
+              <span class="cnt-sub">Neustarts gesamt (Docker)</span>
             </div>
             <span class="cnt-num">{{ $ch.restarts_24h }}</span>
           </article>
 
           <div class="restarts-box">
             <div class="restarts-head">
-              <span>Container mit den meisten Neustarts (24h)</span>
-              <span>Dazzle</span>
+              <span>Container mit den meisten Neustarts</span>
+              <span id="restarts-src">Docker Engine</span>
             </div>
-            <ul class="restart-list">
+            <ul class="restart-list" id="restart-list">
               {{- range $ch.top_restarts }}
               <li class="restart-item">
                 <div>

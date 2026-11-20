@@ -280,7 +280,8 @@ a {
   color: var(--bg-noc);
 }
 
-.pill-btn.sim-ok[aria-pressed="true"] {
+.pill-btn.sim-ok[aria-pressed="true"],
+.pill-btn.sim-live[aria-pressed="true"] {
   background: var(--ok);
   color: #041f17;
 }
@@ -837,6 +838,20 @@ body.view-blueprint .noc-grid-view {
   background: var(--warn-bg);
   color: #fbbf24;
   border: 1px solid var(--warn-border);
+}
+
+.restart-empty {
+  flex: 1;
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-border);
+  color: #34d399;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 /* ─── ZEILE 5: WARNUNGEN / INCIDENTS (MAX 5 RELEVANT EVENTS) ─── */

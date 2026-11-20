@@ -6,4 +6,20 @@ services:
     pull_policy: build
     ports:
       - "${PORT:-3000}:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+    environment:
+      - TZ=Europe/Berlin
+      - POLL_INTERVAL=${POLL_INTERVAL:-10}
+      - CRITICAL_SERVICES=${CRITICAL_SERVICES:-}
+      - EXTRA_SERVICES=${EXTRA_SERVICES:-}
+      - HOSTS=${HOSTS:-}
+      - SSL_DOMAINS=${SSL_DOMAINS:-}
+      - UPTIME_KUMA_URL=${UPTIME_KUMA_URL:-}
+      - UPTIME_KUMA_API_KEY=${UPTIME_KUMA_API_KEY:-}
+      - UPTIME_KUMA_STATUS_SLUG=${UPTIME_KUMA_STATUS_SLUG:-}
+      - PROMETHEUS_URL=${PROMETHEUS_URL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped

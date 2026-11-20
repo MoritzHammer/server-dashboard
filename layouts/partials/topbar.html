@@ -8,31 +8,31 @@
           </svg>
         </span>
         <span class="brand-title">MORITZ HAMMER · NOC</span>
-        <span class="brand-sub">Homelab Operations Center</span>
+        <span class="brand-sub" id="topbar-host-sub">Live Operations Center</span>
       </div>
 
       <div class="global-verdict" id="global-verdict" role="status" aria-live="polite">
         <span class="verdict-led" aria-hidden="true"></span>
-        <span id="global-verdict-text">ALLE SYSTEME NOMINAL · KEIN EINGRIFF ERFORDERLICH</span>
+        <span id="global-verdict-text">VERBINDE MIT LIVE-TELEMETRIE…</span>
       </div>
 
       <div class="topbar-controls">
-        <div class="pill-group" role="group" aria-label="Szenario-Simulation">
-          <button type="button" class="pill-btn sim-ok" data-sim="ok" aria-pressed="true" title="Regelbetrieb: Alles grün">● Nominal</button>
-          <button type="button" class="pill-btn sim-warn" data-sim="warn" aria-pressed="false" title="Simuliere Ressourcen- &amp; SSL-Warnung">▲ Warnung</button>
-          <button type="button" class="pill-btn sim-crit" data-sim="crit" aria-pressed="false" title="Simuliere Dienst- &amp; Host-Ausfall">■ Kritisch</button>
+        <div class="pill-group" role="group" aria-label="Datenmodus">
+          <button type="button" class="pill-btn sim-live" data-sim="live" id="btn-mode-live" aria-pressed="true" title="Echte Live-Daten vom Server (/api/status)">● Live</button>
+          <button type="button" class="pill-btn sim-warn" data-sim="warn" aria-pressed="false" title="Alarm-Test: Warnung simulieren">▲ Test-Warn</button>
+          <button type="button" class="pill-btn sim-crit" data-sim="crit" aria-pressed="false" title="Alarm-Test: Kritischen Ausfall simulieren">■ Test-Krit</button>
         </div>
 
         <div class="pill-group" role="group" aria-label="Ansicht wechseln">
-          <button type="button" class="pill-btn" id="btn-view-noc" aria-pressed="true">NOC Kiosk (Tablet)</button>
-          <button type="button" class="pill-btn" id="btn-view-bp" aria-pressed="false">Grafana Blueprint &amp; PromQL</button>
+          <button type="button" class="pill-btn" id="btn-view-noc" aria-pressed="true">NOC Kiosk</button>
+          <button type="button" class="pill-btn" id="btn-view-bp" aria-pressed="false">Grafana &amp; PromQL</button>
         </div>
 
         <button type="button" class="pill-btn" id="btn-kiosk-fs" aria-pressed="false" title="Kiosk-Vollbild &amp; Screen Wake-Lock aktivieren">⛶ Vollbild</button>
 
         <div class="noc-clock-box">
           <span id="noc-clock">--:--:--</span>
-          <span class="noc-clock-sub" id="noc-refresh-label">SYNC 10S</span>
+          <span class="noc-clock-sub" id="noc-refresh-label">LIVE 5S</span>
         </div>
       </div>
     </header>
