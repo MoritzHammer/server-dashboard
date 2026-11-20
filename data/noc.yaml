@@ -1,0 +1,270 @@
+# ─── ZEILE 1: EXECUTIVE SUMMARY (4 GROSSE STAT-PANELS) ───
+executive_summary:
+  - id: "services-online"
+    row_idx: "01"
+    label: "Dienste online"
+    value: "18 / 18"
+    source: "Uptime Kuma"
+    status: "ok"
+    sub: "100 % Verfügbarkeit · HTTP/TCP"
+  - id: "hosts-online"
+    row_idx: "02"
+    label: "Hosts online"
+    value: "5 / 5"
+    source: "Beszel"
+    status: "ok"
+    sub: "Proxmox Cluster & Docker Nodes"
+  - id: "containers-healthy"
+    row_idx: "03"
+    label: "Container healthy"
+    value: "42 / 42"
+    source: "Dazzle"
+    status: "ok"
+    sub: "Docker Healthchecks aktiv"
+  - id: "ssl-status"
+    row_idx: "04"
+    label: "SSL-Zertifikate"
+    value: "OK"
+    source: "Uptime Kuma"
+    status: "ok"
+    sub: "Min. Restlaufzeit > 14 Tage"
+
+# ─── ZEILE 2: KRITISCHE DIENSTE (STRIKT GRÜN = ONLINE, ROT = OFFLINE) ───
+critical_services:
+  - id: "vaultwarden"
+    name: "Vaultwarden"
+    category: "Passwort-Tresor"
+    endpoint: "192.168.178.90:8081"
+    latency: "4 ms"
+    online: true
+  - id: "immich"
+    name: "Immich"
+    category: "Foto-Cloud & ML"
+    endpoint: "192.168.178.90:2283"
+    latency: "9 ms"
+    online: true
+  - id: "homeassistant"
+    name: "Home Assistant"
+    category: "Smart Home Core"
+    endpoint: "192.168.178.90:8123"
+    latency: "6 ms"
+    online: true
+  - id: "gitea"
+    name: "Gitea"
+    category: "Git & CI/CD"
+    endpoint: "192.168.178.90:3000"
+    latency: "5 ms"
+    online: true
+  - id: "traefik"
+    name: "Traefik"
+    category: "Edge Proxy & TLS"
+    endpoint: "192.168.178.90:443"
+    latency: "2 ms"
+    online: true
+  - id: "wireguard"
+    name: "WireGuard"
+    category: "VPN Tunnel (UDP 51820)"
+    endpoint: "vpn.hammermoritz.de"
+    latency: "11 ms"
+    online: true
+
+# ─── ZEILE 3: INFRASTRUKTURZUSTAND (PROMETHEUS / NODE EXPORTER / BESZEL) ───
+infrastructure:
+  gauges:
+    - id: "cpu"
+      label: "CPU-Last"
+      value: 24
+      unit: "%"
+      source: "Node Exporter · Beszel"
+      thresholds_label: "Grün < 70 % · Gelb 70–85 % · Rot > 85 %"
+      warn_at: 70
+      crit_at: 85
+      detail: "8 vCPU · Load 1.12"
+    - id: "ram"
+      label: "Arbeitsspeicher"
+      value: 58
+      unit: "%"
+      source: "Node Exporter · Beszel"
+      thresholds_label: "Grün < 75 % · Gelb 75–90 % · Rot > 90 %"
+      warn_at: 75
+      crit_at: 90
+      detail: "18.6 / 32.0 GB belegt"
+    - id: "disk"
+      label: "Datenträger"
+      value: 64
+      unit: "%"
+      source: "Node Exporter · ZFS/NVMe"
+      thresholds_label: "Grün < 80 % · Gelb 80–90 % · Rot > 90 %"
+      warn_at: 80
+      crit_at: 90
+      detail: "640 GB / 1.0 TB NVMe"
+  network:
+    label: "Netzwerk-Durchsatz"
+    source: "Node Exporter · eth0 (1 GbE)"
+    inbound: "48.4 Mbit/s"
+    outbound: "14.2 Mbit/s"
+    status: "ok"
+
+# ─── ZEILE 4: CONTAINER-GESUNDHEIT (QUELLE: DAZZLE) ───
+container_health:
+  source: "Dazzle · Docker Engine Socket"
+  healthy: 42
+  unhealthy: 0
+  restarts_24h: 3
+  top_restarts:
+    - name: "Jellyfin"
+      count: 3
+      reason: "Transcoding Worker OOM-Guard"
+      level: "warn"
+    - name: "Immich"
+      count: 1
+      reason: "Geplanter Nightly DB-Reconnect"
+      level: "info"
+
+# ─── ZEILE 5: WARNUNGEN / INCIDENTS (MAXIMAL 5 RELEVANTE EREIGNISSE) ───
+incidents:
+  - level: "warn"
+    badge: "WARNUNG"
+    title: "Jellyfin restart x3"
+    meta: "Dazzle · Letzte 24h · Container läuft aktuell stabil"
+    time: "vor 2 Std."
+  - level: "warn"
+    badge: "WARNUNG"
+    title: "SSL läuft in 14 Tagen ab"
+    meta: "Uptime Kuma · Zertifikats-Renewal für Subdomain vorgemerkt"
+    time: "14d Restzeit"
+  - level: "info"
+    badge: "INFO"
+    title: "Proxmox & Vaultwarden Nightly-Backup erfolgreich"
+    meta: "Backup-Status-Container · 3-2-1 Snapshot verifiziert (42.8 GB)"
+    time: "03:00 Uhr"
+  - level: "info"
+    badge: "INFO"
+    title: "WireGuard Handshake & DDNS-Sync aktiv"
+    meta: "UniFi Gateway · vpn.hammermoritz.de (DNS-only)"
+    time: "laufend"
+
+# ─── GRAFANA & PROMETHEUS ARCHITEKTUR-BLUEPRINT (PFLICHTENHEFT-ERGEBNIS) ───
+blueprint:
+  layout_rows:
+    - row: "Zeile 1 · Executive Summary"
+      grid: "y=0, h=4 (4 Panels à w=6 auf 24er-Grid)"
+      panel_type: "Grafana Stat Panel (Big Value, Color Mode: Background Solid oder Value, Sparkline: Disabled)"
+      goal: "In < 1 Sekunde aus 3 Metern Entfernung erkennbar: 18/18 Dienste, 5/5 Hosts, 42/42 Container, SSL OK."
+    - row: "Zeile 2 · Kritische Dienste"
+      grid: "y=4, h=4 (6 Panels à w=4 oder 1 State-Matrix-Panel w=24)"
+      panel_type: "Stat Panel / State Timeline (Current Value Only) / Status History"
+      goal: "Binäre Farblogik ohne Zwischenfarben: Grün (#10B981) = Online (1), Rot (#EF4444) = Offline (0) für Vaultwarden, Immich, Home Assistant, Gitea, Traefik, WireGuard."
+    - row: "Zeile 3 · Infrastrukturzustand"
+      grid: "y=8, h=5 (3 Gauge/Stat-Panels à w=6 + 1 Netzwerk-Panel w=6)"
+      panel_type: "Gauge Panel (oder Bar Gauge) für CPU/RAM/Disk + Time Series Sparkline (letzte 15 Min.) für Netzwerk"
+      goal: "Sofortige Engpass-Erkennung nach strengen Schwellwerten (CPU 70/85 %, RAM 75/90 %, Disk 80/90 %)."
+    - row: "Zeile 4 · Container-Gesundheit (Dazzle)"
+      grid: "y=13, h=4 (3 Stat-Kacheln à w=4 + 1 kompakte Bar-Gauge/Table w=12)"
+      panel_type: "Stat Panel (Healthy=42, Unhealthy=0, Restarts 24h=3) + Bar Gauge / Kompakt-Tabelle (Top Restarts)"
+      goal: "Crash-Loops (z. B. Jellyfin x3, Immich x1) erkennen, bevor ein Dienst komplett ausfällt."
+    - row: "Zeile 5 · Warnungen / Incidents"
+      grid: "y=17, h=4 (Volle Breite w=24, max. 5 Einträge)"
+      panel_type: "Alert List Panel (Grafana Unified Alerting) oder Table Panel (Transform: Limit 5, Sort by Severity)"
+      goal: "Maximal 5 priorisierte Vorfälle (Rot = Kritisch, Gelb = Warnung, Blau/Grau = Information) ohne Scrollbalken."
+
+  color_palette:
+    - name: "OK / Online / Healthy"
+      hex: "#10B981"
+      usage: "Standardzustand für alle laufenden Dienste, Hosts, Container und Ressourcen unterhalb der Warnschwelle."
+    - name: "Warnung / Degraded"
+      hex: "#F59E0B"
+      usage: "CPU 70–85 %, RAM 75–90 %, Disk 80–90 %, Container-Restarts > 0 (24h), SSL-Ablauf < 21 Tage."
+    - name: "Kritisch / Offline / Alarm"
+      hex: "#EF4444"
+      usage: "Dienst/Host Offline (0), Unhealthy Container > 0, CPU > 85 %, RAM > 90 %, Disk > 90 %, Backup fehlgeschlagen."
+    - name: "Information / Neutral"
+      hex: "#38BDF8"
+      usage: "Informative Events, Netzwerk-Traffic (Inbound Cyan #08B4C4, Outbound Magenta #E2366E)."
+    - name: "NOC Hintergrund & Panels"
+      hex: "#0B0F17 / #121826"
+      usage: "AMOLED-schonendes Tiefdunkel für 24/7-Tablet-Dauerbetrieb ohne Überstrahlung bei Nacht."
+
+  promql_examples:
+    - title: "1. Dienste Online (Uptime Kuma Prometheus-Endpunkt /metrics)"
+      source: "Uptime Kuma"
+      panel: "Stat Panel (Anzeige: 18 / 18 via zwei Queries A/B + Text-Template)"
+      query: |
+        # Query A (Online Dienste):
+        count(monitor_status{job="uptime-kuma"} == 1)
+        # Query B (Gesamtanzahl überwachter Dienste):
+        count(monitor_status{job="uptime-kuma"})
+    - title: "2. Kritische Dienste Status-Matrix (Binär: 1 = Grün, 0 = Rot)"
+      source: "Uptime Kuma"
+      panel: "Stat Panel (Repeat by monitor_name) · Value Mapping: 1 → ONLINE ✅, 0 → OFFLINE 🚨"
+      query: |
+        monitor_status{
+          job="uptime-kuma",
+          monitor_name=~"Vaultwarden|Immich|Home Assistant|Gitea|Traefik|WireGuard"
+        }
+    - title: "3. SSL-Zertifikate Status & kürzeste Restlaufzeit in Tagen"
+      source: "Uptime Kuma"
+      panel: "Stat Panel · Value Mapping: >= 14 → OK (Grün), 7..14 → WARNUNG (Gelb), < 7 → KRITISCH (Rot)"
+      query: |
+        min(monitor_cert_days_remaining{job="uptime-kuma"})
+    - title: "4. Hosts Online (Beszel / Node Exporter Heartbeat)"
+      source: "Beszel / Prometheus"
+      panel: "Stat Panel (Anzeige: 5 / 5)"
+      query: |
+        count(up{job=~"beszel|node-exporter"} == 1)
+        /
+        count(up{job=~"beszel|node-exporter"})
+    - title: "5. CPU-Auslastung in % (Schwellwerte: < 70 % Grün, 70–85 % Gelb, > 85 % Rot)"
+      source: "Node Exporter"
+      panel: "Gauge / Stat Panel"
+      query: |
+        100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle", instance="192.168.178.90:9100"}[2m])) * 100)
+    - title: "6. Arbeitsspeicher (RAM) in % (Schwellwerte: < 75 % Grün, 75–90 % Gelb, > 90 % Rot)"
+      source: "Node Exporter"
+      panel: "Gauge / Stat Panel"
+      query: |
+        (1 - (node_memory_MemAvailable_bytes{instance="192.168.178.90:9100"} / node_memory_MemTotal_bytes{instance="192.168.178.90:9100"})) * 100
+    - title: "7. Datenträger-Belegung Root-FS in % (Schwellwerte: < 80 % Grün, 80–90 % Gelb, > 90 % Rot)"
+      source: "Node Exporter"
+      panel: "Gauge / Stat Panel"
+      query: |
+        100 - ((node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/", fstype!~"tmpfs|overlay"}) * 100)
+    - title: "8. Netzwerk Inbound / Outbound (Bit/s)"
+      source: "Node Exporter"
+      panel: "Stat + Mini-Sparkline (Zeitfenster: letzte 15 Minuten)"
+      query: |
+        # Inbound (Receive):
+        rate(node_network_receive_bytes_total{device=~"eth0|eno1|ens18"}[2m]) * 8
+        # Outbound (Transmit):
+        rate(node_network_transmit_bytes_total{device=~"eth0|eno1|ens18"}[2m]) * 8
+    - title: "9. Container Healthy, Unhealthy & Top-Restarts (letzte 24h)"
+      source: "Dazzle / cAdvisor / Docker Exporter"
+      panel: "Stat Panels + Bar Gauge (Top 5 Restarts)"
+      query: |
+        # Healthy Container:
+        count(container_health_status{status="healthy"} == 1)
+        # Unhealthy Container:
+        count(container_health_status{status="unhealthy"} == 1)
+        # Container Restarts (letzte 24h, Top-Liste):
+        topk(5, round(increase(container_start_time_seconds{name!=""}[24h]) > 0))
+
+  plugins:
+    - name: "100 % Native Grafana Core Panels (Empfohlen)"
+      type: "Core (Grafana 10 / 11)"
+      desc: "Stat, Gauge, Bar Gauge, State Timeline und Alert List decken alle 5 Zeilen ohne externe Plugin-Abhängigkeiten ab — extrem schnell auf ARM-Tablets und wartungsfrei bei Grafana-Updates."
+    - name: "Polystat Panel (grafana-polystat-panel)"
+      type: "Optional · Signiertes Community-Plugin"
+      desc: "Ideal, falls Zeile 2 (Kritische Dienste) später auf 12+ Dienste als Waben-Matrix mit Auto-Scaling erweitert werden soll."
+    - name: "Infinity Datasource (yesoreyeram-infinity-datasource)"
+      type: "Optional · JSON/REST-Brücke"
+      desc: "Ermöglicht das direkte Abfragen von REST-JSON-Endpunkten aus Beszel, Dazzle oder Portainer API, falls einzelne Metriken noch nicht in Prometheus gescraped werden."
+
+  tablet_kiosk:
+    - title: "Grafana TV/Kiosk-URL & Auto-Refresh"
+      detail: "URL auf dem Tablet mit ?kiosk&refresh=10s&theme=dark&from=now-15m&to=now öffnen. Blendet Seitenleiste, Header und Zeitwähler komplett aus und begrenzt die Query-Last auf die letzten 15 Minuten."
+    - title: "Fully Kiosk Browser (Android 8–10 Zoll)"
+      detail: "Keep Screen On aktivieren, Status-/Navigationsleiste ausblenden, Auto-Reload bei Netzwerkverlust einschalten und Bewegungserkennung per Frontkamera (Motion Detection) für nachts nutzen."
+    - title: "3-Meter-Lesbarkeit & Typografie"
+      detail: "Executive-Summary-Werte mit mindestens 38–52 px Schriftgröße (Big Shoulders Display 900), klare Kontrastkanten und Verzicht auf kleine Achsenbeschriftungen."
+    - title: "AMOLED Burn-In-Schutz"
+      detail: "Hintergrund #0B0F17 statt hartem #FFFFFF, keine grellen weißen Rahmen und dezentes Pixel-Shifting bei 24/7-Dauerbetrieb."

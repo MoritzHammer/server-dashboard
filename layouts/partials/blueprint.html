@@ -1,0 +1,98 @@
+    {{- $bp := .Site.Data.noc.blueprint -}}
+    <section class="blueprint-view" id="blueprint-view" aria-label="Grafana &amp; Prometheus Architektur-Blueprint">
+      <div class="bp-hero">
+        <div class="bp-hero-copy">
+          <span class="bp-eyebrow">Grafana &amp; Prometheus Architektur-Spezifikation</span>
+          <h1>HOMELAB NOC <em>Blueprint &amp; PromQL.</em></h1>
+          <p>
+            Vollständiger, produktionsreifer Entwurf für den 24/7-Kiosk-Betrieb auf einem 8–10 Zoll Android-Tablet:
+            konkrete Grafana-Panel-Typen, 24-Spalten-Grid-Layout, Farbschema, PromQL-Abfragen für
+            <strong>Prometheus, Uptime Kuma, Beszel, Dazzle und Node Exporter</strong> sowie ein direkt importierbares Grafana-JSON-Modell.
+          </p>
+        </div>
+        <div class="bp-actions">
+          <a href="/grafana-noc-dashboard.json" download="grafana-noc-dashboard.json" class="bp-btn">Grafana Dashboard JSON herunterladen ↓</a>
+        </div>
+      </div>
+
+      <!-- 1. DASHBOARD-AUFBAU & GRAFANA PANEL-TYPEN -->
+      <div class="bp-section">
+        <h2 class="bp-sec-title">1. Dashboard-Aufbau, Grid-Layout &amp; Konkrete Panel-Typen</h2>
+        <div class="bp-grid-2">
+          {{- range $bp.layout_rows }}
+          <article class="bp-card">
+            <div class="bp-card-head">
+              <span class="bp-card-title">{{ .row }}</span>
+              <span class="bp-chip">{{ .grid }}</span>
+            </div>
+            <p class="bp-card-desc"><strong>Panel-Typ:</strong> {{ .panel_type }}</p>
+            <p class="bp-card-desc"><strong>Betriebsziel:</strong> {{ .goal }}</p>
+          </article>
+          {{- end }}
+        </div>
+      </div>
+
+      <!-- 2. FARBSCHEMA & SCHWELLWERT-LOGIK -->
+      <div class="bp-section">
+        <h2 class="bp-sec-title">2. Verbindliches NOC-Farbschema (3-Meter-Lesbarkeit)</h2>
+        <div class="bp-grid-3">
+          {{- range $idx, $c := $bp.color_palette }}
+          <article class="bp-card">
+            <div class="color-swatch-row">
+              <span class="color-swatch {{ if eq $idx 0 }}swatch-ok{{ else if eq $idx 1 }}swatch-warn{{ else if eq $idx 2 }}swatch-crit{{ else if eq $idx 3 }}swatch-info{{ else }}swatch-bg{{ end }}"></span>
+              <div>
+                <div class="bp-card-title">{{ $c.name }}</div>
+                <span class="bp-chip">{{ $c.hex }}</span>
+              </div>
+            </div>
+            <p class="bp-card-desc">{{ $c.usage }}</p>
+          </article>
+          {{- end }}
+        </div>
+      </div>
+
+      <!-- 3. PROMQL-BEISPIELE FÜR ALLE PANELS -->
+      <div class="bp-section">
+        <h2 class="bp-sec-title">3. PromQL-Abfragen für die wichtigsten Panels</h2>
+        <div class="bp-grid-2">
+          {{- range $idx, $q := $bp.promql_examples }}
+          <article class="bp-card">
+            <div class="bp-card-head">
+              <span class="bp-card-title">{{ $q.title }}</span>
+              <span class="bp-chip">{{ $q.source }}</span>
+            </div>
+            <p class="bp-card-desc">{{ $q.panel }}</p>
+            <div class="bp-code-wrap">
+              <button type="button" class="copy-btn" data-copy-target="promql-{{ $idx }}">Kopieren</button>
+              <pre class="bp-code" id="promql-{{ $idx }}">{{ $q.query }}</pre>
+            </div>
+          </article>
+          {{- end }}
+        </div>
+      </div>
+
+      <!-- 4. EMPFEHLUNGEN FÜR GRAFANA-PLUGINS & TABLET-KIOSK-BETRIEB -->
+      <div class="bp-section">
+        <h2 class="bp-sec-title">4. Grafana-Plugins &amp; Android-Tablet-Kiosk-Optimierungen</h2>
+        <div class="bp-grid-2">
+          {{- range $bp.plugins }}
+          <article class="bp-card">
+            <div class="bp-card-head">
+              <span class="bp-card-title">{{ .name }}</span>
+              <span class="bp-chip">{{ .type }}</span>
+            </div>
+            <p class="bp-card-desc">{{ .desc }}</p>
+          </article>
+          {{- end }}
+          {{- range $bp.tablet_kiosk }}
+          <article class="bp-card">
+            <div class="bp-card-head">
+              <span class="bp-card-title">{{ .title }}</span>
+              <span class="bp-chip">8–10" Tablet Kiosk</span>
+            </div>
+            <p class="bp-card-desc">{{ .detail }}</p>
+          </article>
+          {{- end }}
+        </div>
+      </div>
+    </section>

@@ -1,0 +1,12 @@
+baseURL = "/"
+languageCode = "de-DE"
+title = "MORITZ HAMMER · NOC Server Dashboard (Grafana & Homelab)"
+disableKinds = ["taxonomy", "term", "RSS", "sitemap"]
+
+[params]
+  description = "Produktionsreifes Homelab NOC Status-Dashboard & Grafana/Prometheus-Architektur für Tablet-Kiosk-Betrieb (Uptime Kuma, Beszel, Dazzle, Node Exporter)."
+  author = "Moritz Hammer"
+  host_ip = "192.168.178.90"
+  refresh_seconds = 10
+  github_repo = "https://github.com/MoritzHammer/server-dashboard"
+  main_site = "https://info.moritzhammer.org"

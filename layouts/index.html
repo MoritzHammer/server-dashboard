@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  {{- partial "head.html" . -}}
+</head>
+<body class="view-noc">
+  <div class="noc-shell">
+    {{- partial "topbar.html" . -}}
+    {{- partial "noc_monitor.html" . -}}
+    {{- partial "blueprint.html" . -}}
+  </div>
+  <script src="/js/main.js" defer></script>
+</body>
+</html>

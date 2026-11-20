@@ -1,0 +1,38 @@
+    <header class="noc-topbar">
+      <div class="topbar-brand">
+        <span class="mark" aria-hidden="true">
+          <svg width="140" height="136" viewBox="0 0 140 136" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="70" cy="44" r="42" fill="#F4B41A"/>
+            <circle cx="45" cy="87" r="42" fill="#08B4C4"/>
+            <circle cx="95" cy="87" r="42" fill="#E2366E"/>
+          </svg>
+        </span>
+        <span class="brand-title">MORITZ HAMMER · NOC</span>
+        <span class="brand-sub">Homelab Operations Center</span>
+      </div>
+
+      <div class="global-verdict" id="global-verdict" role="status" aria-live="polite">
+        <span class="verdict-led" aria-hidden="true"></span>
+        <span id="global-verdict-text">ALLE SYSTEME NOMINAL · KEIN EINGRIFF ERFORDERLICH</span>
+      </div>
+
+      <div class="topbar-controls">
+        <div class="pill-group" role="group" aria-label="Szenario-Simulation">
+          <button type="button" class="pill-btn sim-ok" data-sim="ok" aria-pressed="true" title="Regelbetrieb: Alles grün">● Nominal</button>
+          <button type="button" class="pill-btn sim-warn" data-sim="warn" aria-pressed="false" title="Simuliere Ressourcen- &amp; SSL-Warnung">▲ Warnung</button>
+          <button type="button" class="pill-btn sim-crit" data-sim="crit" aria-pressed="false" title="Simuliere Dienst- &amp; Host-Ausfall">■ Kritisch</button>
+        </div>
+
+        <div class="pill-group" role="group" aria-label="Ansicht wechseln">
+          <button type="button" class="pill-btn" id="btn-view-noc" aria-pressed="true">NOC Kiosk (Tablet)</button>
+          <button type="button" class="pill-btn" id="btn-view-bp" aria-pressed="false">Grafana Blueprint &amp; PromQL</button>
+        </div>
+
+        <button type="button" class="pill-btn" id="btn-kiosk-fs" aria-pressed="false" title="Kiosk-Vollbild &amp; Screen Wake-Lock aktivieren">⛶ Vollbild</button>
+
+        <div class="noc-clock-box">
+          <span id="noc-clock">--:--:--</span>
+          <span class="noc-clock-sub" id="noc-refresh-label">SYNC 10S</span>
+        </div>
+      </div>
+    </header>

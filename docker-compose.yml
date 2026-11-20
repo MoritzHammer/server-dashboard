@@ -1,0 +1,9 @@
+services:
+  noc-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    pull_policy: build
+    ports:
+      - "8085:80"
+    restart: unless-stopped

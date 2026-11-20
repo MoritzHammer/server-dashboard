@@ -1,0 +1,188 @@
+    {{- $noc := .Site.Data.noc -}}
+    <main class="noc-grid-view" id="noc-monitor-view" aria-label="NOC Statusmonitor (5 Zeilen)">
+
+      <!-- ─── ZEILE 1: EXECUTIVE SUMMARY (4 GROSSE STAT-PANELS) ─── -->
+      <section class="noc-row" aria-label="Zeile 1: Executive Summary">
+        <div class="row-header">
+          <div class="row-title-wrap">
+            <span class="row-idx">ZEILE 01</span>
+            <h2 class="row-title">Executive Summary</h2>
+          </div>
+          <span class="row-source">Quellen: Uptime Kuma · Beszel · Dazzle</span>
+        </div>
+
+        <div class="exec-grid">
+          {{- range $noc.executive_summary }}
+          <article class="stat-card" data-exec-id="{{ .id }}">
+            <div class="stat-top">
+              <span class="stat-label">{{ .label }}</span>
+              <span class="stat-src-chip">{{ .source }}</span>
+            </div>
+            <div class="stat-value">{{ .value }}</div>
+            <div class="stat-sub">{{ .sub }}</div>
+          </article>
+          {{- end }}
+        </div>
+      </section>
+
+      <!-- ─── ZEILE 2: KRITISCHE DIENSTE (STRIKT GRÜN = ONLINE, ROT = OFFLINE) ─── -->
+      <section class="noc-row" aria-label="Zeile 2: Kritische Dienste">
+        <div class="row-header">
+          <div class="row-title-wrap">
+            <span class="row-idx">ZEILE 02</span>
+            <h2 class="row-title">Kritische Dienste</h2>
+          </div>
+          <span class="row-source">Binäre Status-Matrix (Grün = Online · Rot = Offline · Klick zum Testen)</span>
+        </div>
+
+        <div class="services-matrix">
+          {{- range $noc.critical_services }}
+          <article class="svc-tile" data-svc-id="{{ .id }}" data-default-latency="{{ .latency }}" title="Klicken, um Ausfall von {{ .name }} zu simulieren">
+            <div class="svc-head">
+              <h3 class="svc-name">{{ .name }}</h3>
+              <span class="svc-badge">✅ ONLINE</span>
+            </div>
+            <div class="svc-foot">
+              <span>{{ .category }}</span>
+              <span class="svc-latency">{{ .latency }}</span>
+            </div>
+          </article>
+          {{- end }}
+        </div>
+      </section>
+
+      <!-- ─── ZEILE 3: INFRASTRUKTURZUSTAND (CPU, RAM, DATENTRÄGER, NETZWERK) ─── -->
+      <section class="noc-row" aria-label="Zeile 3: Infrastrukturzustand">
+        <div class="row-header">
+          <div class="row-title-wrap">
+            <span class="row-idx">ZEILE 03</span>
+            <h2 class="row-title">Infrastrukturzustand</h2>
+          </div>
+          <span class="row-source">Prometheus · Node Exporter · Beszel (Host {{ .Site.Params.host_ip }})</span>
+        </div>
+
+        <div class="infra-grid">
+          {{- range $noc.infrastructure.gauges }}
+          <article class="gauge-card" data-gauge-id="{{ .id }}">
+            <div class="gauge-top">
+              <span class="gauge-label">{{ .label }}</span>
+              <span class="gauge-detail">{{ .detail }}</span>
+            </div>
+            <div class="gauge-mid">
+              <span class="gauge-num">{{ .value }} {{ .unit }}</span>
+              <span class="gauge-state-tag">NOMINAL</span>
+            </div>
+            <div class="gauge-track" aria-hidden="true">
+              <div class="gauge-fill gauge-fill--{{ .id }}"></div>
+            </div>
+            <div class="gauge-thresh">{{ .thresholds_label }}</div>
+          </article>
+          {{- end }}
+
+          <!-- Netzwerk Inbound / Outbound + Sparkline -->
+          {{- $net := $noc.infrastructure.network -}}
+          <article class="gauge-card" data-gauge-id="net">
+            <div class="gauge-top">
+              <span class="gauge-label">{{ $net.label }}</span>
+              <span class="gauge-detail">{{ $net.source }}</span>
+            </div>
+            <div class="net-rates">
+              <div class="net-rate-item">
+                <span class="net-dir">↓ Inbound</span>
+                <span class="net-val net-val--in" id="net-in-val">{{ $net.inbound }}</span>
+              </div>
+              <div class="net-rate-item">
+                <span class="net-dir">↑ Outbound</span>
+                <span class="net-val net-val--out" id="net-out-val">{{ $net.outbound }}</span>
+              </div>
+            </div>
+            <svg class="net-spark" viewBox="0 0 240 26" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <polyline points="0,20 24,18 48,14 72,17 96,10 120,13 144,8 168,12 192,7 216,11 240,9" stroke="#08B4C4" stroke-width="2" fill="none"/>
+              <polyline points="0,23 24,22 48,20 72,21 96,18 120,19 144,17 168,19 192,16 216,18 240,17" stroke="#E2366E" stroke-width="1.8" fill="none"/>
+            </svg>
+          </article>
+        </div>
+      </section>
+
+      <!-- ─── ZEILE 4: CONTAINER-GESUNDHEIT (QUELLE: DAZZLE) ─── -->
+      {{- $ch := $noc.container_health -}}
+      <section class="noc-row" aria-label="Zeile 4: Container-Gesundheit">
+        <div class="row-header">
+          <div class="row-title-wrap">
+            <span class="row-idx">ZEILE 04</span>
+            <h2 class="row-title">Container-Gesundheit</h2>
+          </div>
+          <span class="row-source">Quelle: {{ $ch.source }}</span>
+        </div>
+
+        <div class="container-row-grid">
+          <article class="cnt-stat" id="cnt-healthy">
+            <div class="cnt-meta">
+              <span class="cnt-label">Healthy Container</span>
+              <span class="cnt-sub">Quelle: Dazzle · Status OK</span>
+            </div>
+            <span class="cnt-num">{{ $ch.healthy }}</span>
+          </article>
+
+          <article class="cnt-stat" id="cnt-unhealthy">
+            <div class="cnt-meta">
+              <span class="cnt-label">Unhealthy Container</span>
+              <span class="cnt-sub">Zielwert: 0 Container</span>
+            </div>
+            <span class="cnt-num">{{ $ch.unhealthy }}</span>
+          </article>
+
+          <article class="cnt-stat status-warn" id="cnt-restarts">
+            <div class="cnt-meta">
+              <span class="cnt-label">Restarts (24h)</span>
+              <span class="cnt-sub">Container-Neustarts letzte 24h</span>
+            </div>
+            <span class="cnt-num">{{ $ch.restarts_24h }}</span>
+          </article>
+
+          <div class="restarts-box">
+            <div class="restarts-head">
+              <span>Container mit den meisten Neustarts (24h)</span>
+              <span>Dazzle</span>
+            </div>
+            <ul class="restart-list">
+              {{- range $ch.top_restarts }}
+              <li class="restart-item">
+                <div>
+                  <div class="restart-name">{{ .name }}</div>
+                  <div class="restart-reason">{{ .reason }}</div>
+                </div>
+                <span class="restart-count">{{ .count }}</span>
+              </li>
+              {{- end }}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── ZEILE 5: WARNUNGEN / INCIDENTS (MAXIMAL 5 RELEVANTE EREIGNISSE) ─── -->
+      <section class="noc-row" aria-label="Zeile 5: Warnungen und Incidents">
+        <div class="row-header">
+          <div class="row-title-wrap">
+            <span class="row-idx">ZEILE 05</span>
+            <h2 class="row-title">Warnungen &amp; Incidents</h2>
+          </div>
+          <span class="row-source">Max. 5 relevante Ereignisse (Rot = Kritisch · Gelb = Warnung · Blau = Info)</span>
+        </div>
+
+        <ul class="incidents-list" id="incidents-list">
+          {{- range first 5 $noc.incidents }}
+          <li class="incident-card level-{{ .level }}">
+            <div class="inc-left">
+              <span class="inc-badge">{{ .badge }}</span>
+              <div class="inc-text">
+                <span class="inc-title">{{ .title }}</span>
+                <span class="inc-meta">{{ .meta }}</span>
+              </div>
+            </div>
+            <span class="inc-time">{{ .time }}</span>
+          </li>
+          {{- end }}
+        </ul>
+      </section>
+    </main>
