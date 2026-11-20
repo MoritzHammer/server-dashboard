@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MORITZ HAMMER · Live NOC Server Dashboard</title>
+  <meta name="description" content="Live Homelab Network Operations Center (NOC) für 192.168.178.90 — Docker Engine, Host-Telemetrie, Beszel, Uptime Kuma &amp; WUD." />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preload" href="/fonts/big-shoulders-display-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/instrument-sans-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="/fonts/instrument-serif-italic-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="is-night mode-tablet tab-noc">
+  <div class="noc-shell">
+
+    <!-- ─── TOPBAR: CMY MARK · VERDICT · REITER · TABLET/DESKTOP · TAG/NACHT ─── -->
+    <header class="noc-topbar">
+      <div class="topbar-brand">
+        <span class="mark" aria-hidden="true" data-spin>
+          <svg width="140" height="136" viewBox="0 0 140 136" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle class="c-yellow" cx="70" cy="44" r="42" fill="#F4B41A"/>
+            <circle class="c-cyan" cx="45" cy="87" r="42" fill="#08B4C4"/>
+            <circle class="c-magenta" cx="95" cy="87" r="42" fill="#E2366E"/>
+          </svg>
+        </span>
+        <div class="brand-copy">
+          <span class="brand-title">MORITZ HAMMER · NOC</span>
+          <span class="brand-sub" id="topbar-host-sub">192.168.178.90</span>
+        </div>
+      </div>
+
+      <div class="global-verdict" id="global-verdict" role="status" aria-live="polite">
+        <span class="verdict-led" aria-hidden="true"></span>
+        <span id="global-verdict-text">VERBINDE MIT LIVE-TELEMETRIE…</span>
+      </div>
+
+      <div class="topbar-controls">
+        <!-- 4 Live-Reiter (Kein statisches Grafana/PromQL, sondern echte Live-Telemetrie!) -->
+        <div class="pill-group" role="group" aria-label="Reiter wählen">
+          <button type="button" class="pill-btn" data-tab="noc" aria-pressed="true">NOC</button>
+          <button type="button" class="pill-btn" data-tab="kuma-beszel" aria-pressed="false">Beszel &amp; Kuma</button>
+          <button type="button" class="pill-btn" data-tab="wud" aria-pressed="false" id="tab-btn-wud">WUD</button>
+          <button type="button" class="pill-btn" data-tab="telemetry" aria-pressed="false">Live-Telemetrie</button>
+        </div>
+
+        <!-- Tablet / Desktop Umschalter -->
+        <div class="pill-group" role="group" aria-label="Layout-Modus">
+          <button type="button" class="pill-btn" data-layout="tablet" aria-pressed="true" title="8–10 Zoll Tablet-Kiosk (100dvh, kein Scrollen)">Tablet</button>
+          <button type="button" class="pill-btn" data-layout="desktop" aria-pressed="false" title="Desktop-Ansicht mit CMY-Header &amp; Schnellzugriff">Desktop</button>
+        </div>
+
+        <!-- Tag / Nacht Umschalter -->
+        <div class="pill-group" role="group" aria-label="Farbschema">
+          <button type="button" class="pill-btn" data-theme="day" aria-pressed="false">Tag</button>
+          <button type="button" class="pill-btn" data-theme="night" aria-pressed="true">Nacht</button>
+        </div>
+
+        <!-- Live / Alarm-Test -->
+        <div class="pill-group" role="group" aria-label="Datenmodus">
+          <button type="button" class="pill-btn sim-live" data-sim="live" id="btn-mode-live" aria-pressed="true">● Live</button>
+          <button type="button" class="pill-btn sim-warn" data-sim="warn" aria-pressed="false" title="Alarm-Test: Warnung">▲</button>
+          <button type="button" class="pill-btn sim-crit" data-sim="crit" aria-pressed="false" title="Alarm-Test: Kritisch">■</button>
+        </div>
+
+        <button type="button" class="pill-btn" id="btn-kiosk-fs" aria-pressed="false" title="Vollbild &amp; Screen Wake-Lock">⛶</button>
+
+        <div class="noc-clock-box">
+          <span id="noc-clock">--:--:--</span>
+          <span class="noc-clock-sub" id="noc-refresh-label">LIVE 5S</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ─── DESKTOP EDITORIAL HEADER MIT INTERAKTIVEN 3 CMY-KREISEN (WIE INFO.MORITZHAMMER.ORG) ─── -->
+    <section class="cmy-banner" id="cmy-banner" aria-label="Homelab Operations Header">
+      <div class="cmy-banner-copy">
+        <span class="banner-eyebrow" id="banner-sources">HOMELAB OPERATIONS CENTER · 192.168.178.90</span>
+        <h1 class="banner-title">SERVER STATUS <em>live im Blick.</em></h1>
+        <p class="banner-sub">
+          Jede Infokarte lässt sich per Klick aufklappen. Ziehe den Magenta-Kreis rechts für subtraktive CMY-Synthese (Tag/Nacht).
+        </p>
+      </div>
+      <div class="cmy-stage" aria-hidden="true">
+        <span class="cmy-dot d-yellow"></span>
+        <span class="cmy-dot d-cyan"></span>
+        <span class="cmy-dot d-magenta"></span>
+        <div class="cmy-triad">
+          <span class="cmy-sphere sphere-yellow" id="sphere-yellow"></span>
+          <span class="cmy-sphere sphere-cyan" id="sphere-cyan"></span>
+          <span class="cmy-sphere sphere-magenta" id="sphere-magenta" title="Ziehen für Tag/Nacht-Wechsel"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         REITER 1: NOC MONITOR (5 ZEILEN · ALLE INFOKARTEN AUSKLAPPBAR)
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <main class="view-pane pane-noc" id="pane-noc" aria-label="NOC Statusmonitor">
+      <div class="noc-grid-view" id="noc-monitor-view">
+
+        <!-- ZEILE 1: EXECUTIVE SUMMARY -->
+        <section class="noc-row" aria-label="Zeile 1: Executive Summary">
+          <div class="row-header">
+            <div class="row-title-wrap">
+              <span class="row-idx">01</span>
+              <h2 class="row-title">Executive Summary</h2>
+            </div>
+            <span class="row-source" id="row1-source">Quellen: Live-Probe · Beszel · Docker Engine · Live TLS</span>
+          </div>
+
+          <div class="exec-grid" id="exec-grid">
+            <article class="stat-card is-expandable" data-card-id="exec-services-online" data-exec-id="services-online">
+              <div class="stat-top">
+                <span class="stat-label">Dienste online</span>
+                <div class="card-head-right">
+                  <span class="stat-src-chip">Live-Probe</span>
+                  <span class="chevron" aria-hidden="true">▾</span>
+                </div>
+              </div>
+              <div class="stat-value">6 / 6</div>
+              <div class="stat-sub">Initialisiere Live-Check…</div>
+              <div class="card-drawer" data-drawer-for="exec-services-online"></div>
+            </article>
+
+            <article class="stat-card is-expandable" data-card-id="exec-hosts-online" data-exec-id="hosts-online">
+              <div class="stat-top">
+                <span class="stat-label">Hosts online</span>
+                <div class="card-head-right">
+                  <span class="stat-src-chip">Host-Check</span>
+                  <span class="chevron" aria-hidden="true">▾</span>
+                </div>
+              </div>
+              <div class="stat-value">1 / 1</div>
+              <div class="stat-sub">192.168.178.90</div>
+              <div class="card-drawer" data-drawer-for="exec-hosts-online"></div>
+            </article>
+
+            <article class="stat-card is-expandable" data-card-id="exec-containers-healthy" data-exec-id="containers-healthy">
+              <div class="stat-top">
+                <span class="stat-label">Container healthy</span>
+                <div class="card-head-right">
+                  <span class="stat-src-chip">Docker Engine</span>
+                  <span class="chevron" aria-hidden="true">▾</span>
+                </div>
+              </div>
+              <div class="stat-value">– / –</div>
+              <div class="stat-sub">Lese Docker Socket…</div>
+              <div class="card-drawer" data-drawer-for="exec-containers-healthy"></div>
+            </article>
+
+            <article class="stat-card is-expandable" data-card-id="exec-ssl-status" data-exec-id="ssl-status">
+              <div class="stat-top">
+                <span class="stat-label">SSL-Zertifikate</span>
+                <div class="card-head-right">
+                  <span class="stat-src-chip">Live TLS</span>
+                  <span class="chevron" aria-hidden="true">▾</span>
+                </div>
+              </div>
+              <div class="stat-value">OK</div>
+              <div class="stat-sub">Prüfe info.moritzhammer.org…</div>
+              <div class="card-drawer" data-drawer-for="exec-ssl-status"></div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ZEILE 2: KRITISCHE DIENSTE (NUR DEINE ECHTEN SERVICES · AUSKLAPPBAR) -->
+        <section class="noc-row" aria-label="Zeile 2: Kritische Dienste">
+          <div class="row-header">
+            <div class="row-title-wrap">
+              <span class="row-idx">02</span>
+              <h2 class="row-title">Kritische Dienste</h2>
+            </div>
+            <span class="row-source">Binär: Grün = Online · Rot = Offline · Klick für Details &amp; Direktlink</span>
+          </div>
+
+          <div class="services-matrix" id="services-matrix"></div>
+        </section>
+
+        <!-- ZEILE 3: INFRASTRUKTURZUSTAND (AUSKLAPPBARE GAUGES & LIVE SPARKLINE) -->
+        <section class="noc-row" aria-label="Zeile 3: Infrastrukturzustand">
+          <div class="row-header">
+            <div class="row-title-wrap">
+              <span class="row-idx">03</span>
+              <h2 class="row-title">Infrastrukturzustand</h2>
+            </div>
+            <span class="row-source" id="row3-source">Host /proc · Live Telemetrie</span>
+          </div>
+
+          <div class="infra-grid">
+            <article class="gauge-card is-expandable" data-card-id="gauge-cpu" data-gauge-id="cpu">
+              <div class="gauge-top">
+                <span class="gauge-label">CPU-Last</span>
+                <div class="card-head-right">
+                  <span class="gauge-detail">Lade…</span>
+                  <span class="chevron" aria-hidden="true">▾</span>
+                </div>
+              </div>
+              <div class="gauge-mid">
+                <span class="gauge-num">– %</span>
+                <span class="gauge-state-tag">NOMINAL</span>
+              </div>
+              <div class="gauge-track"><div class="gauge-fill"></div></div>
+              <div class="gauge-thresh">Grün &lt; 70 % · Gelb 70–85 % · Rot &gt; 85 %</div>
+              <div class="card-drawer" data-drawer-for="gauge-cpu"></div>
+            </article>
+
+            <article class="gauge-card is-expandable" data-card-id="gauge-ram" data-gauge-id="ram">
+              <div class="gauge-top">
+                <span class="gauge-label">Arbeitsspeicher</span>
+                <div class="card-head-right">
+                  <span class="gauge-detail">Lade…</span>
+                  <span class="chevron" aria-hidden="true">▾</span>
+                </div>
+              </div>
+              <div class="gauge-mid">
+                <span class="gauge-num">– %</span>
+                <span class="gauge-state-tag">NOMINAL</span>
+              </div>
+              <div class="gauge-track"><div class="gauge-fill"></div></div>
+              <div class="gauge-thresh">Grün &lt; 75 % · Gelb 75–90 % · Rot &gt; 90 %</div>
+              <div class="card-drawer" data-drawer-for="gauge-ram"></div>
+            </article>
+
+            <article class="gauge-card is-expandable" data-card-id="gauge-disk" data-gauge-id="disk">
+              <div class="gauge-top">
+                <span class="gauge-label">Datenträger</span>
+                <div class="card-head-right">
+                  <span class="gauge-detail">Lade…</span>
+                  <span class="chevron" aria-hidden="true">▾</span>
+                </div>
+              </div>
+              <div class="gauge-mid">
+                <span class="gauge-num">– %</span>
+                <span class="gauge-state-tag">NOMINAL</span>
+              </div>
+              <div class="gauge-track"><div class="gauge-fill"></div></div>
+              <div class="gauge-thresh">Grün &lt; 80 % · Gelb 80–90 % · Rot &gt; 90 %</div>
+              <div class="card-drawer" data-drawer-for="gauge-disk"></div>
+            </article>
+
+            <article class="gauge-card is-expandable" data-card-id="gauge-net" data-gauge-id="net">
+              <div class="gauge-top">
+                <span class="gauge-label">Netzwerk</span>
+                <div class="card-head-right">
+                  <span class="gauge-detail" id="net-iface-label">NIC eth0</span>
+                  <span class="chevron" aria-hidden="true">▾</span>
+                </div>
+              </div>
+              <div class="net-rates">
+                <div class="net-rate-item">
+                  <span class="net-dir">↓ Inbound</span>
+                  <span class="net-val net-val--in" id="net-in-val">0 Kbit/s</span>
+                </div>
+                <div class="net-rate-item">
+                  <span class="net-dir">↑ Outbound</span>
+                  <span class="net-val net-val--out" id="net-out-val">0 Kbit/s</span>
+                </div>
+              </div>
+              <svg class="net-spark" viewBox="0 0 240 26" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <polyline id="spark-in" points="0,22 240,22" stroke="#08B4C4" stroke-width="2" fill="none"/>
+                <polyline id="spark-out" points="0,24 240,24" stroke="#E2366E" stroke-width="1.8" fill="none"/>
+              </svg>
+              <div class="card-drawer" data-drawer-for="gauge-net"></div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ZEILE 4: CONTAINER-GESUNDHEIT & WUD UPDATES (AUSKLAPPBAR) -->
+        <section class="noc-row" aria-label="Zeile 4: Container-Gesundheit und WUD Updates">
+          <div class="row-header">
+            <div class="row-title-wrap">
+              <span class="row-idx">04</span>
+              <h2 class="row-title">Container &amp; WUD Updates</h2>
+            </div>
+            <span class="row-source" id="row4-source">Quellen: Docker Engine Socket &amp; What's Up Docker (WUD)</span>
+          </div>
+
+          <div class="container-row-grid">
+            <article class="cnt-stat is-expandable" data-card-id="cnt-healthy" id="cnt-healthy">
+              <div class="cnt-main">
+                <div class="cnt-meta">
+                  <span class="cnt-label">Healthy <span class="chevron">▾</span></span>
+                  <span class="cnt-sub" id="cnt-healthy-sub">Docker Engine</span>
+                </div>
+                <span class="cnt-num">–</span>
+              </div>
+              <div class="card-drawer" data-drawer-for="cnt-healthy"></div>
+            </article>
+
+            <article class="cnt-stat is-expandable" data-card-id="cnt-unhealthy" id="cnt-unhealthy">
+              <div class="cnt-main">
+                <div class="cnt-meta">
+                  <span class="cnt-label">Unhealthy <span class="chevron">▾</span></span>
+                  <span class="cnt-sub">Zielwert: 0</span>
+                </div>
+                <span class="cnt-num">0</span>
+              </div>
+              <div class="card-drawer" data-drawer-for="cnt-unhealthy"></div>
+            </article>
+
+            <article class="cnt-stat is-expandable" data-card-id="cnt-restarts" id="cnt-restarts">
+              <div class="cnt-main">
+                <div class="cnt-meta">
+                  <span class="cnt-label">Restarts <span class="chevron">▾</span></span>
+                  <span class="cnt-sub">Docker gesamt</span>
+                </div>
+                <span class="cnt-num">0</span>
+              </div>
+              <div class="card-drawer" data-drawer-for="cnt-restarts"></div>
+            </article>
+
+            <article class="cnt-stat is-expandable" data-card-id="cnt-wud" id="cnt-wud">
+              <div class="cnt-main">
+                <div class="cnt-meta">
+                  <span class="cnt-label">WUD Updates <span class="chevron">▾</span></span>
+                  <span class="cnt-sub" id="cnt-wud-sub">Image-Check</span>
+                </div>
+                <span class="cnt-num" id="cnt-wud-num">0</span>
+              </div>
+              <div class="card-drawer" data-drawer-for="cnt-wud"></div>
+            </article>
+
+            <div class="restarts-box">
+              <div class="restarts-head">
+                <span>Top Restarts / Offene Updates</span>
+                <span id="restarts-src">Docker &amp; WUD</span>
+              </div>
+              <ul class="restart-list" id="restart-list">
+                <li class="restart-empty"><span>✓ Alle Container stabil</span><span>0 Restarts</span></li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- ZEILE 5: WARNUNGEN & INCIDENTS (MAX 5 · AUSKLAPPBAR) -->
+        <section class="noc-row" aria-label="Zeile 5: Warnungen und Incidents">
+          <div class="row-header">
+            <div class="row-title-wrap">
+              <span class="row-idx">05</span>
+              <h2 class="row-title">Warnungen &amp; Incidents</h2>
+            </div>
+            <span class="row-source">Max. 5 Ereignisse · Klick auf eine Meldung für Details</span>
+          </div>
+
+          <ul class="incidents-list" id="incidents-list"></ul>
+        </section>
+      </div>
+
+      <!-- SCHNELLZUGRIFF-LEISTE (NUR IM DESKTOP-MODUS UNTERHALB DES NOC) -->
+      <section class="quick-section" id="quick-links-section" aria-label="Schnellzugriff auf deine Homelab-Dienste">
+        <div class="section-bar">
+          <div class="row-title-wrap">
+            <span class="row-idx">SCHNELLZUGRIFF</span>
+            <h2 class="row-title">Deine Homelab-Dienste (192.168.178.90)</h2>
+          </div>
+          <span class="row-source">Nur deine tatsächlich aktiven Stacks</span>
+        </div>
+
+        <div class="quick-grid">
+          <a class="quick-card" href="http://192.168.178.90:8081" target="_blank" rel="noopener">
+            <div class="quick-top"><span class="quick-name">Vaultwarden</span><span class="quick-port">:8081 ↗</span></div>
+            <span class="quick-tag">Passwort-Manager</span>
+          </a>
+          <a class="quick-card" href="http://192.168.178.90:2283" target="_blank" rel="noopener">
+            <div class="quick-top"><span class="quick-name">Immich</span><span class="quick-port">:2283 ↗</span></div>
+            <span class="quick-tag">Fotoverwaltung</span>
+          </a>
+          <a class="quick-card" href="http://192.168.178.90:8000" target="_blank" rel="noopener">
+            <div class="quick-top"><span class="quick-name">Paperless-ngx</span><span class="quick-port">:8000 ↗</span></div>
+            <span class="quick-tag">Dokumente</span>
+          </a>
+          <a class="quick-card" href="http://192.168.178.90:81" target="_blank" rel="noopener">
+            <div class="quick-top"><span class="quick-name">Nginx Proxy Manager</span><span class="quick-port">:81 ↗</span></div>
+            <span class="quick-tag">Reverse Proxy &amp; SSL</span>
+          </a>
+          <a class="quick-card" href="http://192.168.178.90:3001" target="_blank" rel="noopener">
+            <div class="quick-top"><span class="quick-name">Uptime Kuma</span><span class="quick-port">:3001 ↗</span></div>
+            <span class="quick-tag">Monitoring</span>
+          </a>
+          <a class="quick-card" href="http://192.168.178.90:8099/system/n9qil9mgcw9fhwm" target="_blank" rel="noopener">
+            <div class="quick-top"><span class="quick-name">Beszel</span><span class="quick-port">:8099 ↗</span></div>
+            <span class="quick-tag">Host-Metriken</span>
+          </a>
+          <a class="quick-card" href="http://192.168.178.90:8888" target="_blank" rel="noopener">
+            <div class="quick-top"><span class="quick-name">Dozzle</span><span class="quick-port">:8888 ↗</span></div>
+            <span class="quick-tag">Container-Logs</span>
+          </a>
+          <a class="quick-card" href="http://192.168.178.90:8082" target="_blank" rel="noopener">
+            <div class="quick-top"><span class="quick-name">Filebrowser</span><span class="quick-port">:8082 ↗</span></div>
+            <span class="quick-tag">Web-Dateimanager</span>
+          </a>
+          <a class="quick-card" href="http://192.168.178.90:8080" target="_blank" rel="noopener">
+            <div class="quick-top"><span class="quick-name">Website</span><span class="quick-port">:8080 ↗</span></div>
+            <span class="quick-tag">info.moritzhammer.org</span>
+          </a>
+        </div>
+      </section>
+    </main>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         REITER 2: EXTRA REITER FÜR BESZEL & UPTIME KUMA (LIVE-FENSTER + PROXY)
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <section class="view-pane pane-kuma-beszel" id="pane-kuma-beszel" aria-label="Beszel und Uptime Kuma Live-Fenster">
+      <div class="embeds-section">
+        <div class="section-bar">
+          <div class="row-title-wrap">
+            <span class="row-idx">LIVE-FENSTER</span>
+            <h2 class="row-title">Beszel &amp; Uptime Kuma</h2>
+          </div>
+          <div class="embed-controls">
+            <div class="pill-group" role="group" aria-label="Fenster-Aufteilung">
+              <button type="button" class="pill-btn" data-embed-layout="split" aria-pressed="true">Nebeneinander</button>
+              <button type="button" class="pill-btn" data-embed-layout="beszel" aria-pressed="false">Nur Beszel</button>
+              <button type="button" class="pill-btn" data-embed-layout="kuma" aria-pressed="false">Nur Uptime Kuma</button>
+            </div>
+            <div class="pill-group" role="group" aria-label="Einbettungs-Modus">
+              <button type="button" class="pill-btn" data-embed-mode="proxy" aria-pressed="true" title="Integrierter Same-Origin-Proxy (umgeht X-Frame-Options automatisch)">Proxy</button>
+              <button type="button" class="pill-btn" data-embed-mode="direct" aria-pressed="false" title="Direkte LAN-URL im Iframe laden">Direkt</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Native API Strips (automatisch sichtbar, wenn Beszel/Kuma API konfiguriert) -->
+        <div class="beszel-hosts-bar" id="beszel-hosts-bar" hidden></div>
+        <div class="kuma-monitors-bar" id="kuma-monitors-bar" hidden></div>
+
+        <div class="embed-grid layout-split" id="embed-grid">
+          <article class="embed-window" id="win-beszel">
+            <div class="embed-win-head">
+              <div class="embed-win-title">
+                <span class="win-dot" id="dot-beszel"></span>
+                <strong>Beszel</strong>
+                <span class="win-url" id="url-label-beszel">http://192.168.178.90:8099/system/n9qil9mgcw9fhwm</span>
+              </div>
+              <div class="embed-win-actions">
+                <button type="button" class="win-btn" id="reload-beszel" title="Beszel neu laden">↻</button>
+                <a href="http://192.168.178.90:8099/system/n9qil9mgcw9fhwm" target="_blank" rel="noopener" class="win-btn" id="open-beszel">↗ Tab</a>
+              </div>
+            </div>
+            <div class="embed-frame-wrap">
+              <iframe id="iframe-beszel" src="about:blank" title="Beszel Live-Monitoring"></iframe>
+            </div>
+            <div class="embed-hint" id="hint-beszel">
+              Same-Origin-Proxy aktiv (<code>/system/n9qil9mgcw9fhwm</code> → <code>:8099</code>) — entfernt <code>X-Frame-Options</code> automatisch. Einmal einloggen bleibt im Browser gespeichert.
+            </div>
+          </article>
+
+          <article class="embed-window" id="win-kuma">
+            <div class="embed-win-head">
+              <div class="embed-win-title">
+                <span class="win-dot" id="dot-kuma"></span>
+                <strong>Uptime Kuma</strong>
+                <span class="win-url" id="url-label-kuma">http://192.168.178.90:3001/status/overview</span>
+              </div>
+              <div class="embed-win-actions">
+                <button type="button" class="win-btn" id="reload-kuma" title="Uptime Kuma neu laden">↻</button>
+                <a href="http://192.168.178.90:3001/status/overview" target="_blank" rel="noopener" class="win-btn" id="open-kuma">↗ Tab</a>
+              </div>
+            </div>
+            <div class="embed-frame-wrap">
+              <iframe id="iframe-kuma" src="about:blank" title="Uptime Kuma Live-Status"></iframe>
+            </div>
+            <div class="embed-hint" id="hint-kuma">
+              Same-Origin-Proxy aktiv (<code>/status/overview</code> → <code>:3001</code>) — Statusseite ohne Login &amp; ohne <code>X-Frame-Options</code>-Blockade.
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         REITER 3: WUD (WHAT'S UP DOCKER) LIVE UPDATE TRACKER
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <section class="view-pane pane-wud" id="pane-wud" aria-label="WUD Container Updates">
+      <div class="wud-section">
+        <div class="section-bar">
+          <div class="row-title-wrap">
+            <span class="row-idx">WUD UPDATES</span>
+            <h2 class="row-title">What's Up Docker · Verfügbare Image-Updates</h2>
+          </div>
+          <div class="embed-controls">
+            <span class="row-source" id="wud-status-summary">Verbinde mit WUD (/api/containers)…</span>
+            <a href="#" target="_blank" rel="noopener" class="win-btn" id="open-wud" hidden>WUD UI öffnen ↗</a>
+          </div>
+        </div>
+        <div class="wud-grid" id="wud-updates-grid"></div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         REITER 4: LIVE-TELEMETRIE (LIVE CHARTS · CONTAINER EXPLORER · SSL)
+         ═══════════════════════════════════════════════════════════════════════ -->
+    <section class="view-pane pane-telemetry" id="pane-telemetry" aria-label="Live-Telemetrie und Container Explorer">
+      <!-- Live Rolling Time-Series Charts (Pure SVG, 0 externe Libs) -->
+      <div class="tele-section">
+        <div class="section-bar">
+          <div class="row-title-wrap">
+            <span class="row-idx">ECHTZEIT-VERLAUF</span>
+            <h2 class="row-title">Live Host-Metriken (Rollendes 2-Minuten-Fenster)</h2>
+          </div>
+          <span class="row-source" id="tele-host-meta">Sampling alle 2 Sekunden direkt aus /host/proc</span>
+        </div>
+
+        <div class="charts-grid">
+          <article class="chart-card">
+            <div class="chart-head">
+              <div>
+                <span class="stat-label">CPU-Auslastung</span>
+                <div class="chart-big-val" id="chart-cpu-val">– %</div>
+              </div>
+              <span class="stat-src-chip">Cyan · Live</span>
+            </div>
+            <svg class="live-chart-svg" viewBox="0 0 360 110" preserveAspectRatio="none" aria-hidden="true">
+              <line x1="0" y1="33" x2="360" y2="33" class="chart-grid-line" />
+              <line x1="0" y1="66" x2="360" y2="66" class="chart-grid-line" />
+              <polygon id="chart-cpu-area" points="0,110 360,110" class="chart-area-cyan" />
+              <polyline id="chart-cpu-line" points="0,108 360,108" class="chart-line-cyan" />
+            </svg>
+            <div class="chart-foot"><span>0 %</span><span>Warnung 70 % · Kritisch 85 %</span><span>100 %</span></div>
+          </article>
+
+          <article class="chart-card">
+            <div class="chart-head">
+              <div>
+                <span class="stat-label">Arbeitsspeicher (RAM)</span>
+                <div class="chart-big-val" id="chart-ram-val">– %</div>
+              </div>
+              <span class="stat-src-chip">Magenta · Live</span>
+            </div>
+            <svg class="live-chart-svg" viewBox="0 0 360 110" preserveAspectRatio="none" aria-hidden="true">
+              <line x1="0" y1="28" x2="360" y2="28" class="chart-grid-line" />
+              <line x1="0" y1="66" x2="360" y2="66" class="chart-grid-line" />
+              <polygon id="chart-ram-area" points="0,110 360,110" class="chart-area-magenta" />
+              <polyline id="chart-ram-line" points="0,108 360,108" class="chart-line-magenta" />
+            </svg>
+            <div class="chart-foot"><span>0 %</span><span>Warnung 75 % · Kritisch 90 %</span><span>100 %</span></div>
+          </article>
+
+          <article class="chart-card">
+            <div class="chart-head">
+              <div>
+                <span class="stat-label">Netzwerk Durchsatz</span>
+                <div class="chart-big-val" id="chart-net-val">↓ 0 · ↑ 0</div>
+              </div>
+              <span class="stat-src-chip">RX Cyan · TX Gelb</span>
+            </div>
+            <svg class="live-chart-svg" viewBox="0 0 360 110" preserveAspectRatio="none" aria-hidden="true">
+              <line x1="0" y1="36" x2="360" y2="36" class="chart-grid-line" />
+              <line x1="0" y1="72" x2="360" y2="72" class="chart-grid-line" />
+              <polyline id="chart-net-in" points="0,108 360,108" class="chart-line-cyan" />
+              <polyline id="chart-net-out" points="0,108 360,108" class="chart-line-yellow" />
+            </svg>
+            <div class="chart-foot"><span id="chart-net-totals">RX 0 GB · TX 0 GB</span><span id="chart-net-peak">Peak: 0 Mbit/s</span></div>
+          </article>
+        </div>
+      </div>
+
+      <!-- Live Docker Container Explorer (Filterbar + Ausklappbare Karten!) -->
+      <div class="tele-section">
+        <div class="section-bar">
+          <div class="row-title-wrap">
+            <span class="row-idx">DOCKER EXPLORER</span>
+            <h2 class="row-title">Alle Live-Container</h2>
+          </div>
+          <div class="embed-controls">
+            <div class="pill-group" role="group" aria-label="Container filtern">
+              <button type="button" class="pill-btn" data-cfilter="all" aria-pressed="true">Alle</button>
+              <button type="button" class="pill-btn" data-cfilter="unhealthy" aria-pressed="false">Unhealthy</button>
+              <button type="button" class="pill-btn" data-cfilter="restarts" aria-pressed="false">Mit Restarts</button>
+            </div>
+          </div>
+        </div>
+        <div class="container-explorer-grid" id="container-explorer-grid"></div>
+      </div>
+
+      <!-- Live SSL-Zertifikate Inspector (Ausklappbare Karten!) -->
+      <div class="tele-section">
+        <div class="section-bar">
+          <div class="row-title-wrap">
+            <span class="row-idx">LIVE TLS / SSL</span>
+            <h2 class="row-title">Überwachte Zertifikate</h2>
+          </div>
+          <span class="row-source">Direkter TLS-Handshake auf Port 443</span>
+        </div>
+        <div class="ssl-grid" id="ssl-inspector-grid"></div>
+      </div>
+    </section>
+
+  </div>
+  <script src="/js/main.js" defer></script>
+</body>
+</html>

@@ -18,17 +18,19 @@ services:
       - EXTRA_SERVICES=${EXTRA_SERVICES:-}
       - HOSTS=${HOSTS:-}
       - SSL_DOMAINS=${SSL_DOMAINS:-info.moritzhammer.org}
-      # Uptime Kuma (Live-Metriken + eingebettetes Fenster)
+      # Uptime Kuma (Live-Statusseite /status/overview + Same-Origin Proxy)
       - UPTIME_KUMA_URL=${UPTIME_KUMA_URL:-http://192.168.178.90:3001}
-      - UPTIME_KUMA_EMBED_URL=${UPTIME_KUMA_EMBED_URL:-}
+      - UPTIME_KUMA_STATUS_SLUG=${UPTIME_KUMA_STATUS_SLUG:-overview}
+      - UPTIME_KUMA_EMBED_URL=${UPTIME_KUMA_EMBED_URL:-http://192.168.178.90:3001/status/overview}
       - UPTIME_KUMA_API_KEY=${UPTIME_KUMA_API_KEY:-}
-      - UPTIME_KUMA_STATUS_SLUG=${UPTIME_KUMA_STATUS_SLUG:-}
-      # Beszel (Live-Fenster + optional PocketBase Multi-Host API)
-      - BESZEL_URL=${BESZEL_URL:-http://192.168.178.90:8090}
-      - BESZEL_EMBED_URL=${BESZEL_EMBED_URL:-}
+      # Beszel (Live-Systemseite Port 8099 + Same-Origin Proxy + optional PocketBase API)
+      - BESZEL_URL=${BESZEL_URL:-http://192.168.178.90:8099}
+      - BESZEL_EMBED_URL=${BESZEL_EMBED_URL:-http://192.168.178.90:8099/system/n9qil9mgcw9fhwm}
       - BESZEL_EMAIL=${BESZEL_EMAIL:-}
       - BESZEL_PASSWORD=${BESZEL_PASSWORD:-}
-      # WUD / What's Up Docker (wird automatisch via Docker-Socket erkannt oder hier manuell setzen)
+      # Integrierter Same-Origin-Proxy entfernt X-Frame-Options/CSP automatisch für Beszel & Kuma
+      - ENABLE_EMBED_PROXY=${ENABLE_EMBED_PROXY:-true}
+      # WUD / What's Up Docker (automatische Port-Erkennung via Docker Socket oder manuell setzen)
       - WUD_URL=${WUD_URL:-}
       - WUD_USER=${WUD_USER:-}
       - WUD_PASS=${WUD_PASS:-}

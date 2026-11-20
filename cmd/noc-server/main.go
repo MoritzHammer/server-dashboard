@@ -5,13 +5,16 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"math"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -24,25 +27,31 @@ import (
 	"time"
 )
 
+//go:embed all:web
+var embeddedWeb embed.FS
+
 // ─── API RESPONSE TYPES ───
 
 type DashboardPayload struct {
-	Mode             string          `json:"mode"`
-	Timestamp        string          `json:"timestamp"`
-	PollIntervalSec  int             `json:"poll_interval_sec"`
-	Hostname         string          `json:"hostname"`
-	HostIP           string          `json:"host_ip"`
-	UptimeHuman      string          `json:"uptime_human"`
-	Sources          []string        `json:"sources"`
-	Verdict          VerdictInfo     `json:"verdict"`
-	ExecutiveSummary []ExecStat      `json:"executive_summary"`
-	CriticalServices []ServiceStatus `json:"critical_services"`
-	Infrastructure   InfraStatus     `json:"infrastructure"`
-	ContainerHealth  ContainerHealth `json:"container_health"`
-	WUD              WUDSnapshot     `json:"wud"`
-	Beszel           BeszelSnapshot  `json:"beszel"`
-	Embeds           EmbedConfig     `json:"embeds"`
-	Incidents        []IncidentItem  `json:"incidents"`
+	Mode             string                `json:"mode"`
+	Timestamp        string                `json:"timestamp"`
+	PollIntervalSec  int                   `json:"poll_interval_sec"`
+	Hostname         string                `json:"hostname"`
+	HostIP           string                `json:"host_ip"`
+	UptimeHuman      string                `json:"uptime_human"`
+	Sources          []string              `json:"sources"`
+	Verdict          VerdictInfo           `json:"verdict"`
+	ExecutiveSummary []ExecStat            `json:"executive_summary"`
+	CriticalServices []ServiceStatus       `json:"critical_services"`
+	Infrastructure   InfraStatus           `json:"infrastructure"`
+	ContainerHealth  ContainerHealth       `json:"container_health"`
+	Containers       []DockerContainerInfo `json:"containers"`
+	SSLCerts         []SSLCheckResult      `json:"ssl_certs"`
+	WUD              WUDSnapshot           `json:"wud"`
+	Beszel           BeszelSnapshot        `json:"beszel"`
+	Kuma             KumaPublicSnapshot    `json:"kuma"`
+	Embeds           EmbedConfig           `json:"embeds"`
+	Incidents        []IncidentItem        `json:"incidents"`
 }
 
 type VerdictInfo struct {
@@ -51,33 +60,37 @@ type VerdictInfo struct {
 }
 
 type ExecStat struct {
-	ID     string `json:"id"`
-	Label  string `json:"label"`
-	Value  string `json:"value"`
-	Source string `json:"source"`
-	Status string `json:"status"` // "ok", "warn", "crit"
-	Sub    string `json:"sub"`
+	ID      string   `json:"id"`
+	Label   string   `json:"label"`
+	Value   string   `json:"value"`
+	Source  string   `json:"source"`
+	Status  string   `json:"status"` // "ok", "warn", "crit"
+	Sub     string   `json:"sub"`
+	Details []string `json:"details"`
 }
 
 type ServiceStatus struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Category string `json:"category"`
-	Target   string `json:"target"`
-	Online   bool   `json:"online"`
-	Latency  string `json:"latency"`
-	Error    string `json:"error,omitempty"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Category        string `json:"category"`
+	Target          string `json:"target"`
+	Online          bool   `json:"online"`
+	Latency         string `json:"latency"`
+	HTTPCode        int    `json:"http_code,omitempty"`
+	ContainerStatus string `json:"container_status,omitempty"`
+	Error           string `json:"error,omitempty"`
 }
 
 type GaugeStatus struct {
-	ID        string  `json:"id"`
-	Label     string  `json:"label"`
-	Value     float64 `json:"value"`
-	Unit      string  `json:"unit"`
-	Status    string  `json:"status"` // "ok", "warn", "crit"
-	StateTag  string  `json:"state_tag"`
-	Detail    string  `json:"detail"`
-	Threshold string  `json:"threshold"`
+	ID        string   `json:"id"`
+	Label     string   `json:"label"`
+	Value     float64  `json:"value"`
+	Unit      string   `json:"unit"`
+	Status    string   `json:"status"` // "ok", "warn", "crit"
+	StateTag  string   `json:"state_tag"`
+	Detail    string   `json:"detail"`
+	Threshold string   `json:"threshold"`
+	Extra     []string `json:"extra"`
 }
 
 type NetworkStatus struct {
@@ -86,14 +99,18 @@ type NetworkStatus struct {
 	OutboundStr  string    `json:"outbound_str"`
 	InboundMbps  float64   `json:"inbound_mbps"`
 	OutboundMbps float64   `json:"outbound_mbps"`
+	RxTotalGB    float64   `json:"rx_total_gb"`
+	TxTotalGB    float64   `json:"tx_total_gb"`
 	InHistory    []float64 `json:"in_history"`
 	OutHistory   []float64 `json:"out_history"`
 }
 
 type InfraStatus struct {
-	Source  string        `json:"source"`
-	Gauges  []GaugeStatus `json:"gauges"`
-	Network NetworkStatus `json:"network"`
+	Source     string        `json:"source"`
+	Gauges     []GaugeStatus `json:"gauges"`
+	Network    NetworkStatus `json:"network"`
+	CPUHistory []float64     `json:"cpu_history"`
+	RAMHistory []float64     `json:"ram_history"`
 }
 
 type RestartEntry struct {
@@ -101,6 +118,18 @@ type RestartEntry struct {
 	Count  int    `json:"count"`
 	Reason string `json:"reason"`
 	State  string `json:"state"`
+}
+
+type DockerContainerInfo struct {
+	Name       string   `json:"name"`
+	Stack      string   `json:"stack"`
+	Image      string   `json:"image"`
+	State      string   `json:"state"`
+	StatusText string   `json:"status_text"`
+	Health     string   `json:"health"` // "healthy", "unhealthy", "running", "stopped"
+	Restarts   int      `json:"restarts"`
+	OOMKilled  bool     `json:"oom_killed"`
+	Ports      []string `json:"ports"`
 }
 
 type ContainerHealth struct {
@@ -118,7 +147,7 @@ type WUDUpdateItem struct {
 	Image       string `json:"image"`
 	CurrentTag  string `json:"current_tag"`
 	NewTag      string `json:"new_tag"`
-	SemverDiff  string `json:"semver_diff"` // "major", "minor", "patch", "digest", ""
+	SemverDiff  string `json:"semver_diff"`
 	CautionDB   bool   `json:"caution_db"`
 	ReleaseLink string `json:"release_link,omitempty"`
 }
@@ -135,7 +164,7 @@ type WUDSnapshot struct {
 type BeszelHostItem struct {
 	Name   string  `json:"name"`
 	Host   string  `json:"host"`
-	Status string  `json:"status"` // "up", "down", "paused"
+	Status string  `json:"status"`
 	CPU    float64 `json:"cpu"`
 	Mem    float64 `json:"mem"`
 	Disk   float64 `json:"disk"`
@@ -151,23 +180,42 @@ type BeszelSnapshot struct {
 	Hosts     []BeszelHostItem `json:"hosts"`
 }
 
+type KumaPublicMonitor struct {
+	Name      string  `json:"name"`
+	Online    bool    `json:"online"`
+	LatencyMs float64 `json:"latency_ms"`
+	CertDays  int     `json:"cert_days,omitempty"`
+}
+
+type KumaPublicSnapshot struct {
+	Available bool                `json:"available"`
+	Reachable bool                `json:"reachable"`
+	Online    int                 `json:"online"`
+	Total     int                 `json:"total"`
+	Monitors  []KumaPublicMonitor `json:"monitors"`
+}
+
 type EmbedConfig struct {
-	BeszelURL    string `json:"beszel_url"`
-	BeszelOnline bool   `json:"beszel_online"`
-	KumaURL      string `json:"kuma_url"`
-	KumaOnline   bool   `json:"kuma_online"`
-	WUDURL       string `json:"wud_url"`
-	WUDOnline    bool   `json:"wud_online"`
-	DozzleURL    string `json:"dozzle_url"`
+	BeszelURL      string `json:"beszel_url"`
+	BeszelFrameURL string `json:"beszel_frame_url"`
+	BeszelOnline   bool   `json:"beszel_online"`
+	KumaURL        string `json:"kuma_url"`
+	KumaFrameURL   string `json:"kuma_frame_url"`
+	KumaOnline     bool   `json:"kuma_online"`
+	ProxyEnabled   bool   `json:"proxy_enabled"`
+	WUDURL         string `json:"wud_url"`
+	WUDOnline      bool   `json:"wud_online"`
+	DozzleURL      string `json:"dozzle_url"`
 }
 
 type IncidentItem struct {
-	Level string `json:"level"` // "crit", "warn", "info"
-	Badge string `json:"badge"`
-	Title string `json:"title"`
-	Meta  string `json:"meta"`
-	Time  string `json:"time"`
-	Rank  int    `json:"-"`
+	Level  string `json:"level"` // "crit", "warn", "info"
+	Badge  string `json:"badge"`
+	Title  string `json:"title"`
+	Meta   string `json:"meta"`
+	Detail string `json:"detail"`
+	Time   string `json:"time"`
+	Rank   int    `json:"-"`
 }
 
 // ─── CONFIGURATION ───
@@ -185,7 +233,6 @@ type HostDef struct {
 
 type Config struct {
 	ListenAddr       string
-	PublicDir        string
 	HostIP           string
 	PollInterval     time.Duration
 	DockerSocket     string
@@ -204,6 +251,7 @@ type Config struct {
 	BeszelEmbed      string
 	BeszelEmail      string
 	BeszelPassword   string
+	EnableEmbedProxy bool
 	WUDURL           string
 	WUDUser          string
 	WUDPass          string
@@ -291,7 +339,6 @@ func loadConfig() Config {
 		rootfs = "/"
 	}
 
-	// Only real services actually running in Moritz's homelab (no Gitea, no Traefik)
 	defaultCrit := strings.Join([]string{
 		fmt.Sprintf("Vaultwarden|Passwort-Manager|http://%s:8081", hostIP),
 		fmt.Sprintf("Immich|Fotoverwaltung|http://%s:2283", hostIP),
@@ -308,7 +355,7 @@ func loadConfig() Config {
 	}
 
 	kumaURL := strings.TrimRight(envOr("UPTIME_KUMA_URL", fmt.Sprintf("http://%s:3001", hostIP)), "/")
-	kumaSlug := envOr("UPTIME_KUMA_STATUS_SLUG", "")
+	kumaSlug := envOr("UPTIME_KUMA_STATUS_SLUG", "overview")
 	kumaEmbed := strings.TrimRight(envOr("UPTIME_KUMA_EMBED_URL", ""), "/")
 	if kumaEmbed == "" {
 		if kumaSlug != "" {
@@ -318,14 +365,15 @@ func loadConfig() Config {
 		}
 	}
 
-	beszelURL := strings.TrimRight(envOr("BESZEL_URL", fmt.Sprintf("http://%s:8090", hostIP)), "/")
-	beszelEmbed := strings.TrimRight(envOr("BESZEL_EMBED_URL", beszelURL), "/")
+	beszelURL := strings.TrimRight(envOr("BESZEL_URL", fmt.Sprintf("http://%s:8099", hostIP)), "/")
+	beszelEmbed := strings.TrimRight(envOr("BESZEL_EMBED_URL", fmt.Sprintf("%s/system/n9qil9mgcw9fhwm", beszelURL)), "/")
+	proxyRaw := strings.ToLower(envOr("ENABLE_EMBED_PROXY", "true"))
+	enableProxy := proxyRaw != "false" && proxyRaw != "0" && proxyRaw != "no"
 	wudURL := strings.TrimRight(envOr("WUD_URL", ""), "/")
 	dozzleURL := strings.TrimRight(envOr("DOZZLE_URL", fmt.Sprintf("http://%s:8888", hostIP)), "/")
 
 	return Config{
 		ListenAddr:       envOr("LISTEN_ADDR", ":80"),
-		PublicDir:        envOr("PUBLIC_DIR", "/srv/public"),
 		HostIP:           hostIP,
 		PollInterval:     time.Duration(pollSec) * time.Second,
 		DockerSocket:     envOr("DOCKER_SOCKET", "/var/run/docker.sock"),
@@ -344,6 +392,7 @@ func loadConfig() Config {
 		BeszelEmbed:      beszelEmbed,
 		BeszelEmail:      envOr("BESZEL_EMAIL", ""),
 		BeszelPassword:   envOr("BESZEL_PASSWORD", ""),
+		EnableEmbedProxy: enableProxy,
 		WUDURL:           wudURL,
 		WUDUser:          envOr("WUD_USER", ""),
 		WUDPass:          envOr("WUD_PASS", ""),
@@ -352,7 +401,7 @@ func loadConfig() Config {
 	}
 }
 
-// ─── SYSTEM SAMPLER (/proc CPU, RAM, DISK, NETWORK) ───
+// ─── SYSTEM SAMPLER (/proc CPU, RAM, DISK, NETWORK + 60-POINT HISTORY) ───
 
 type cpuSample struct {
 	idle  uint64
@@ -366,6 +415,22 @@ type netSample struct {
 	iface   string
 }
 
+type memDetails struct {
+	pct      float64
+	usedGB   float64
+	totalGB  float64
+	availGB  float64
+	cachedGB float64
+}
+
+type diskDetails struct {
+	pct     float64
+	usedGB  float64
+	totalGB float64
+	freeGB  float64
+	mount   string
+}
+
 type SystemSampler struct {
 	mu          sync.RWMutex
 	procDir     string
@@ -376,7 +441,11 @@ type SystemSampler struct {
 	cpuPct      float64
 	inMbps      float64
 	outMbps     float64
+	rxTotalGB   float64
+	txTotalGB   float64
 	activeIface string
+	cpuHist     []float64
+	ramHist     []float64
 	inHist      []float64
 	outHist     []float64
 }
@@ -386,8 +455,10 @@ func NewSystemSampler(procDir, rootfs, netIface string) *SystemSampler {
 		procDir:    procDir,
 		rootfsPath: rootfs,
 		netIface:   netIface,
-		inHist:     make([]float64, 0, 16),
-		outHist:    make([]float64, 0, 16),
+		cpuHist:    make([]float64, 0, 60),
+		ramHist:    make([]float64, 0, 60),
+		inHist:     make([]float64, 0, 60),
+		outHist:    make([]float64, 0, 60),
 	}
 }
 
@@ -493,6 +564,7 @@ func (s *SystemSampler) readNet() (netSample, error) {
 func (s *SystemSampler) sampleOnce() {
 	cNow, cErr := s.readCPU()
 	nNow, nErr := s.readNet()
+	mem := readMemInfo(s.procDir)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -513,9 +585,13 @@ func (s *SystemSampler) sampleOnce() {
 		cp := cNow
 		s.prevCPU = &cp
 	}
+	s.cpuHist = appendRing(s.cpuHist, s.cpuPct, 60)
+	s.ramHist = appendRing(s.ramHist, mem.pct, 60)
 
 	if nErr == nil {
 		s.activeIface = nNow.iface
+		s.rxTotalGB = math.Round((float64(nNow.rxBytes)/1_073_741_824.0)*100) / 100
+		s.txTotalGB = math.Round((float64(nNow.txBytes)/1_073_741_824.0)*100) / 100
 		if s.prevNet != nil {
 			secs := nNow.at.Sub(s.prevNet.at).Seconds()
 			if secs > 0.2 && nNow.rxBytes >= s.prevNet.rxBytes && nNow.txBytes >= s.prevNet.txBytes {
@@ -523,8 +599,8 @@ func (s *SystemSampler) sampleOnce() {
 				outMbps := float64(nNow.txBytes-s.prevNet.txBytes) * 8.0 / secs / 1_000_000.0
 				s.inMbps = math.Round(inMbps*100) / 100
 				s.outMbps = math.Round(outMbps*100) / 100
-				s.inHist = appendRing(s.inHist, s.inMbps, 16)
-				s.outHist = appendRing(s.outHist, s.outMbps, 16)
+				s.inHist = appendRing(s.inHist, s.inMbps, 60)
+				s.outHist = appendRing(s.outHist, s.outMbps, 60)
 			}
 		}
 		np := nNow
@@ -532,12 +608,31 @@ func (s *SystemSampler) sampleOnce() {
 	}
 }
 
-func (s *SystemSampler) Snapshot() (cpu float64, load1 string, cores int, ramPct float64, ramDetail string, diskPct float64, diskDetail string, netStatus NetworkStatus, uptimeStr string, hostName string) {
+type systemSnapshot struct {
+	cpuPct     float64
+	load1      string
+	load5      string
+	load15     string
+	cores      int
+	mem        memDetails
+	disk       diskDetails
+	net        NetworkStatus
+	cpuHistory []float64
+	ramHistory []float64
+	uptimeStr  string
+	hostName   string
+}
+
+func (s *SystemSampler) Snapshot() systemSnapshot {
 	s.mu.RLock()
-	cpu = s.cpuPct
+	cpu := s.cpuPct
 	inMbps := s.inMbps
 	outMbps := s.outMbps
+	rxGB := s.rxTotalGB
+	txGB := s.txTotalGB
 	iface := s.activeIface
+	cpuHist := append([]float64(nil), s.cpuHist...)
+	ramHist := append([]float64(nil), s.ramHist...)
 	inHist := append([]float64(nil), s.inHist...)
 	outHist := append([]float64(nil), s.outHist...)
 	s.mu.RUnlock()
@@ -545,92 +640,114 @@ func (s *SystemSampler) Snapshot() (cpu float64, load1 string, cores int, ramPct
 	if iface == "" {
 		iface = "eth0"
 	}
-	if len(inHist) == 0 {
+	if len(inHist) < 2 {
 		inHist = []float64{0, 0}
 		outHist = []float64{0, 0}
 	}
-
-	cores = runtime.NumCPU()
-	load1 = readLoad1(s.procDir)
-	ramPct, ramDetail = readMemInfo(s.procDir)
-	diskPct, diskDetail = readDiskInfo(s.rootfsPath)
-	uptimeStr = readUptime(s.procDir)
-	hostName = readHostName(s.procDir)
-
-	netStatus = NetworkStatus{
-		Interface:    iface,
-		InboundStr:   formatRate(inMbps),
-		OutboundStr:  formatRate(outMbps),
-		InboundMbps:  inMbps,
-		OutboundMbps: outMbps,
-		InHistory:    inHist,
-		OutHistory:   outHist,
+	if len(cpuHist) < 2 {
+		cpuHist = []float64{cpu, cpu}
 	}
-	return
+	mem := readMemInfo(s.procDir)
+	if len(ramHist) < 2 {
+		ramHist = []float64{mem.pct, mem.pct}
+	}
+	l1, l5, l15 := readLoadAvg(s.procDir)
+
+	return systemSnapshot{
+		cpuPct:     cpu,
+		load1:      l1,
+		load5:      l5,
+		load15:     l15,
+		cores:      runtime.NumCPU(),
+		mem:        mem,
+		disk:       readDiskInfo(s.rootfsPath),
+		cpuHistory: cpuHist,
+		ramHistory: ramHist,
+		uptimeStr:  readUptime(s.procDir),
+		hostName:   readHostName(s.procDir),
+		net: NetworkStatus{
+			Interface:    iface,
+			InboundStr:   formatRate(inMbps),
+			OutboundStr:  formatRate(outMbps),
+			InboundMbps:  inMbps,
+			OutboundMbps: outMbps,
+			RxTotalGB:    rxGB,
+			TxTotalGB:    txGB,
+			InHistory:    inHist,
+			OutHistory:   outHist,
+		},
+	}
 }
 
-func readLoad1(procDir string) string {
+func readLoadAvg(procDir string) (string, string, string) {
 	b, err := os.ReadFile(filepath.Join(procDir, "loadavg"))
 	if err != nil {
-		return "0.00"
+		return "0.00", "0.00", "0.00"
 	}
-	fields := strings.Fields(string(b))
-	if len(fields) > 0 {
-		return fields[0]
+	f := strings.Fields(string(b))
+	if len(f) >= 3 {
+		return f[0], f[1], f[2]
 	}
-	return "0.00"
+	return "0.00", "0.00", "0.00"
 }
 
-func readMemInfo(procDir string) (float64, string) {
+func readMemInfo(procDir string) memDetails {
 	f, err := os.Open(filepath.Join(procDir, "meminfo"))
 	if err != nil {
-		return 0, "n/a"
+		return memDetails{}
 	}
 	defer f.Close()
-	var totalKB, availKB uint64
+	var totalKB, availKB, cachedKB, buffersKB uint64
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := sc.Text()
-		if strings.HasPrefix(line, "MemTotal:") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				totalKB, _ = strconv.ParseUint(fields[1], 10, 64)
-			}
-		} else if strings.HasPrefix(line, "MemAvailable:") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				availKB, _ = strconv.ParseUint(fields[1], 10, 64)
-			}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		v, _ := strconv.ParseUint(fields[1], 10, 64)
+		switch fields[0] {
+		case "MemTotal:":
+			totalKB = v
+		case "MemAvailable:":
+			availKB = v
+		case "Cached:":
+			cachedKB = v
+		case "Buffers:":
+			buffersKB = v
 		}
 	}
 	if totalKB == 0 {
-		return 0, "n/a"
+		return memDetails{}
 	}
 	usedKB := totalKB - availKB
-	pct := math.Round((float64(usedKB)/float64(totalKB))*1000) / 10
-	usedGB := float64(usedKB) / 1048576.0
-	totalGB := float64(totalKB) / 1048576.0
-	return pct, fmt.Sprintf("%.1f / %.1f GB belegt", usedGB, totalGB)
+	return memDetails{
+		pct:      math.Round((float64(usedKB)/float64(totalKB))*1000) / 10,
+		usedGB:   math.Round((float64(usedKB)/1048576.0)*10) / 10,
+		totalGB:  math.Round((float64(totalKB)/1048576.0)*10) / 10,
+		availGB:  math.Round((float64(availKB)/1048576.0)*10) / 10,
+		cachedGB: math.Round((float64(cachedKB+buffersKB)/1048576.0)*10) / 10,
+	}
 }
 
-func readDiskInfo(path string) (float64, string) {
+func readDiskInfo(path string) diskDetails {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {
-		return 0, "n/a"
+		return diskDetails{mount: path}
 	}
 	total := float64(st.Blocks) * float64(st.Bsize)
 	avail := float64(st.Bavail) * float64(st.Bsize)
 	if total <= 0 {
-		return 0, "n/a"
+		return diskDetails{mount: path}
 	}
 	used := total - avail
-	pct := math.Round((used/total)*1000) / 10
-	usedGB := used / 1_073_741_824.0
-	totalGB := total / 1_073_741_824.0
-	if totalGB >= 1000 {
-		return pct, fmt.Sprintf("%.0f GB / %.2f TB", usedGB, totalGB/1024.0)
+	return diskDetails{
+		pct:     math.Round((used/total)*1000) / 10,
+		usedGB:  math.Round((used/1_073_741_824.0)*10) / 10,
+		totalGB: math.Round((total/1_073_741_824.0)*10) / 10,
+		freeGB:  math.Round((avail/1_073_741_824.0)*10) / 10,
+		mount:   path,
 	}
-	return pct, fmt.Sprintf("%.0f / %.0f GB", usedGB, totalGB)
 }
 
 func readUptime(procDir string) string {
@@ -672,7 +789,7 @@ func formatRate(mbps float64) string {
 	return fmt.Sprintf("%.1f Mbit/s", mbps)
 }
 
-// ─── DOCKER ENGINE SOCKET CLIENT (+ AUTO-DISCOVERY FOR WUD / BESZEL / KUMA) ───
+// ─── DOCKER ENGINE SOCKET CLIENT ───
 
 type dockerPort struct {
 	PrivatePort int    `json:"PrivatePort"`
@@ -712,10 +829,11 @@ type DockerSnapshot struct {
 	Total           int
 	Restarts        int
 	TopRestarts     []RestartEntry
+	Containers      []DockerContainerInfo
 	UnhealthyNames  []string
-	OOMNames        []string
 	RunningByName   map[string]bool
 	UnhealthyByName map[string]bool
+	StatusByName    map[string]string
 	DiscoveredWUD   string
 	DiscoveredBesz  string
 }
@@ -723,8 +841,10 @@ type DockerSnapshot struct {
 func collectDocker(socketPath, hostIP string) DockerSnapshot {
 	snap := DockerSnapshot{
 		TopRestarts:     []RestartEntry{},
+		Containers:      []DockerContainerInfo{},
 		RunningByName:   map[string]bool{},
 		UnhealthyByName: map[string]bool{},
+		StatusByName:    map[string]string{},
 	}
 	if _, err := os.Stat(socketPath); err != nil {
 		return snap
@@ -764,7 +884,6 @@ func collectDocker(socketPath, hostIP string) DockerSnapshot {
 	}
 	snap.Available = true
 
-	// Auto-discover published host port for WUD and Beszel if running
 	for _, c := range list {
 		if strings.ToLower(c.State) != "running" {
 			continue
@@ -822,6 +941,8 @@ func collectDocker(socketPath, hostIP string) DockerSnapshot {
 	wg.Wait()
 
 	restartsList := make([]RestartEntry, 0)
+	allContainers := make([]DockerContainerInfo, 0, len(results))
+
 	for _, item := range results {
 		name := "container"
 		if len(item.sum.Names) > 0 {
@@ -829,6 +950,11 @@ func collectDocker(socketPath, hostIP string) DockerSnapshot {
 		}
 		lowerName := strings.ToLower(name)
 		state := strings.ToLower(item.sum.State)
+		stack := item.sum.Labels["com.docker.compose.project"]
+		if stack == "" {
+			stack = "standalone"
+		}
+
 		rc := 0
 		healthStatus := ""
 		oom := false
@@ -843,27 +969,59 @@ func collectDocker(socketPath, hostIP string) DockerSnapshot {
 			}
 		}
 
+		seenPort := map[string]bool{}
+		ports := make([]string, 0)
+		for _, p := range item.sum.Ports {
+			if p.PublicPort > 0 {
+				lbl := fmt.Sprintf(":%d→%d/%s", p.PublicPort, p.PrivatePort, p.Type)
+				if !seenPort[lbl] {
+					seenPort[lbl] = true
+					ports = append(ports, lbl)
+				}
+			}
+		}
+
+		effHealth := "stopped"
 		if state == "running" {
 			snap.RunningByName[lowerName] = true
+			snap.StatusByName[lowerName] = item.sum.Status
 			if healthStatus == "unhealthy" {
+				effHealth = "unhealthy"
 				snap.Unhealthy++
 				snap.Total++
 				snap.UnhealthyByName[lowerName] = true
 				snap.UnhealthyNames = append(snap.UnhealthyNames, name)
+			} else if healthStatus == "healthy" {
+				effHealth = "healthy"
+				snap.Healthy++
+				snap.Total++
 			} else {
+				effHealth = "running"
 				snap.Healthy++
 				snap.Total++
 			}
 		} else if state == "restarting" || (state == "exited" && exitCode != 0) || oom {
+			effHealth = "unhealthy"
 			snap.Unhealthy++
 			snap.Total++
 			snap.UnhealthyByName[lowerName] = true
 			snap.UnhealthyNames = append(snap.UnhealthyNames, name)
+			snap.StatusByName[lowerName] = item.sum.Status
+		} else {
+			snap.StatusByName[lowerName] = item.sum.Status
 		}
 
-		if oom {
-			snap.OOMNames = append(snap.OOMNames, name)
-		}
+		allContainers = append(allContainers, DockerContainerInfo{
+			Name:       name,
+			Stack:      stack,
+			Image:      item.sum.Image,
+			State:      state,
+			StatusText: item.sum.Status,
+			Health:     effHealth,
+			Restarts:   rc,
+			OOMKilled:  oom,
+			Ports:      ports,
+		})
 
 		if rc > 0 {
 			snap.Restarts += rc
@@ -882,6 +1040,26 @@ func collectDocker(socketPath, hostIP string) DockerSnapshot {
 		}
 	}
 
+	sort.Slice(allContainers, func(i, j int) bool {
+		order := func(h string) int {
+			switch h {
+			case "unhealthy":
+				return 0
+			case "healthy":
+				return 1
+			case "running":
+				return 2
+			default:
+				return 3
+			}
+		}
+		oi, oj := order(allContainers[i].Health), order(allContainers[j].Health)
+		if oi != oj {
+			return oi < oj
+		}
+		return allContainers[i].Name < allContainers[j].Name
+	})
+
 	sort.Slice(restartsList, func(i, j int) bool {
 		if restartsList[i].Count != restartsList[j].Count {
 			return restartsList[i].Count > restartsList[j].Count
@@ -891,6 +1069,8 @@ func collectDocker(socketPath, hostIP string) DockerSnapshot {
 	if len(restartsList) > 4 {
 		restartsList = restartsList[:4]
 	}
+
+	snap.Containers = allContainers
 	snap.TopRestarts = restartsList
 	return snap
 }
@@ -1055,7 +1235,6 @@ func (bc *BeszelClient) Collect(beszelURL, email, password string) BeszelSnapsho
 		},
 	}
 
-	// Quick reachability probe
 	if r, err := client.Get(beszelURL + "/api/health"); err == nil {
 		snap.Reachable = r.StatusCode < 500
 		r.Body.Close()
@@ -1068,13 +1247,11 @@ func (bc *BeszelClient) Collect(beszelURL, email, password string) BeszelSnapsho
 		return snap
 	}
 
-	// If email + password provided, authenticate via PocketBase JWT and fetch systems
 	if email != "" && password != "" {
 		tok := bc.getToken(client, beszelURL, email, password, false)
 		if tok != "" {
 			items, ok := fetchBeszelSystems(client, beszelURL, tok)
 			if !ok {
-				// Retry once with fresh token
 				tok = bc.getToken(client, beszelURL, email, password, true)
 				if tok != "" {
 					items, ok = fetchBeszelSystems(client, beszelURL, tok)
@@ -1102,10 +1279,7 @@ func (bc *BeszelClient) getToken(client *http.Client, baseURL, email, password s
 	if !force && bc.token != "" && time.Now().Before(bc.tokenExp) {
 		return bc.token
 	}
-	payload, _ := json.Marshal(map[string]string{
-		"identity": email,
-		"password": password,
-	})
+	payload, _ := json.Marshal(map[string]string{"identity": email, "password": password})
 	resp, err := client.Post(baseURL+"/api/collections/users/auth-with-password", "application/json", bytes.NewReader(payload))
 	if err != nil {
 		return ""
@@ -1170,7 +1344,7 @@ func fetchBeszelSystems(client *http.Client, baseURL, token string) ([]BeszelHos
 	return hosts, len(hosts) > 0
 }
 
-// ─── UPTIME KUMA METRICS CLIENT ───
+// ─── UPTIME KUMA CLIENT ───
 
 type KumaMonitor struct {
 	Name      string
@@ -1236,7 +1410,6 @@ func collectUptimeKuma(baseURL, apiKey, statusSlug string) KumaSnapshot {
 			return snap
 		}
 	}
-
 	return snap
 }
 
@@ -1336,11 +1509,7 @@ func collectKumaStatusPage(client *http.Client, baseURL, slug string, snap *Kuma
 				status = last.Status
 				ping = last.Ping
 			}
-			snap.Monitors[mon.Name] = KumaMonitor{
-				Name:      mon.Name,
-				Status:    status,
-				LatencyMs: ping,
-			}
+			snap.Monitors[mon.Name] = KumaMonitor{Name: mon.Name, Status: status, LatencyMs: ping}
 			snap.Total++
 			if status == 1 {
 				snap.Online++
@@ -1377,18 +1546,14 @@ func extractMetricVal(line string) (float64, bool) {
 	return v, err == nil
 }
 
-// ─── PROMETHEUS OPTIONAL QUERY CLIENT ───
+// ─── PROMETHEUS OPTIONAL QUERY ───
 
 func queryPrometheusScalar(baseURL, promql string) (float64, bool) {
 	if baseURL == "" {
 		return 0, false
 	}
-	client := &http.Client{
-		Timeout:   3 * time.Second,
-		Transport: &http.Transport{Proxy: nil},
-	}
-	u := baseURL + "/api/v1/query?query=" + url.QueryEscape(promql)
-	resp, err := client.Get(u)
+	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
+	resp, err := client.Get(baseURL + "/api/v1/query?query=" + url.QueryEscape(promql))
 	if err != nil || resp.StatusCode != 200 {
 		if resp != nil {
 			resp.Body.Close()
@@ -1418,15 +1583,29 @@ func queryPrometheusScalar(baseURL, promql string) (float64, bool) {
 	return v, err == nil
 }
 
-// ─── ACTIVE SERVICE / HOST / SSL PROBERS ───
+// ─── SERVICE / HOST / SSL PROBERS ───
+
+func matchContainerStatus(serviceName string, dockerSnap DockerSnapshot) string {
+	if !dockerSnap.Available {
+		return ""
+	}
+	kw := strings.ToLower(strings.Split(serviceName, " ")[0])
+	kw = strings.Split(kw, "-")[0]
+	for cname, statusText := range dockerSnap.StatusByName {
+		if strings.Contains(cname, kw) {
+			return cname + " (" + statusText + ")"
+		}
+	}
+	return ""
+}
 
 func probeService(def ServiceDef, dockerSnap DockerSnapshot, kumaSnap KumaSnapshot) ServiceStatus {
-	id := slugify(def.Name)
 	st := ServiceStatus{
-		ID:       id,
-		Name:     def.Name,
-		Category: def.Category,
-		Target:   def.Target,
+		ID:              slugify(def.Name),
+		Name:            def.Name,
+		Category:        def.Category,
+		Target:          def.Target,
+		ContainerStatus: matchContainerStatus(def.Name, dockerSnap),
 	}
 
 	if kumaSnap.Available {
@@ -1517,6 +1696,7 @@ func probeService(def ServiceDef, dockerSnap DockerSnapshot, kumaSnap KumaSnapsh
 		return st
 	}
 	resp.Body.Close()
+	st.HTTPCode = resp.StatusCode
 	if resp.StatusCode >= 500 {
 		st.Online = false
 		st.Latency = fmt.Sprintf("HTTP %d", resp.StatusCode)
@@ -1542,11 +1722,8 @@ func probeHost(def HostDef) (bool, string) {
 		return true, "TCP OK"
 	}
 	client := &http.Client{
-		Timeout: 2500 * time.Millisecond,
-		Transport: &http.Transport{
-			Proxy:           nil,
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
+		Timeout:   2500 * time.Millisecond,
+		Transport: &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 	}
 	resp, err := client.Get(def.Target)
 	if err != nil {
@@ -1557,10 +1734,12 @@ func probeHost(def HostDef) (bool, string) {
 }
 
 type SSLCheckResult struct {
-	Domain   string
-	DaysLeft int
-	Valid    bool
-	ErrText  string
+	Domain   string `json:"domain"`
+	DaysLeft int    `json:"days_left"`
+	Valid    bool   `json:"valid"`
+	Issuer   string `json:"issuer,omitempty"`
+	NotAfter string `json:"not_after,omitempty"`
+	ErrText  string `json:"error,omitempty"`
 }
 
 func checkSSLDomain(domain string) SSLCheckResult {
@@ -1578,8 +1757,19 @@ func checkSSLDomain(domain string) SSLCheckResult {
 	if len(certs) == 0 {
 		return SSLCheckResult{Domain: domain, Valid: false, ErrText: "Kein Zertifikat"}
 	}
-	days := int(time.Until(certs[0].NotAfter).Hours() / 24.0)
-	return SSLCheckResult{Domain: domain, DaysLeft: days, Valid: days >= 0}
+	leaf := certs[0]
+	days := int(time.Until(leaf.NotAfter).Hours() / 24.0)
+	issuer := leaf.Issuer.CommonName
+	if issuer == "" && len(leaf.Issuer.Organization) > 0 {
+		issuer = leaf.Issuer.Organization[0]
+	}
+	return SSLCheckResult{
+		Domain:   domain,
+		DaysLeft: days,
+		Valid:    days >= 0,
+		Issuer:   issuer,
+		NotAfter: leaf.NotAfter.Format("02.01.2006"),
+	}
 }
 
 // ─── MAIN LIVE COLLECTOR ───
@@ -1605,7 +1795,7 @@ func (lc *LiveCollector) Start(ctx context.Context) {
 	ticker := time.NewTicker(lc.cfg.PollInterval)
 	go func() {
 		defer ticker.Stop()
-		time.Sleep(400 * time.Millisecond)
+		time.Sleep(350 * time.Millisecond)
 		lc.refresh()
 		for {
 			select {
@@ -1635,20 +1825,18 @@ func (lc *LiveCollector) refresh() {
 	var sources []string
 	var incidents []IncidentItem
 
-	// 1. Docker Engine live metrics (+ auto-discovery for WUD / Beszel)
 	dockerSnap := collectDocker(lc.cfg.DockerSocket, lc.cfg.HostIP)
 	if dockerSnap.Available {
 		sources = append(sources, "Docker Engine")
 	}
 
-	// 2. Host system metrics (/proc)
-	cpu, load1, cores, ramPct, ramDetail, diskPct, diskDetail, netSt, uptimeStr, hostName := lc.sampler.Snapshot()
+	sys := lc.sampler.Snapshot()
+	hostName := sys.hostName
 	if dockerSnap.Hostname != "" {
 		hostName = dockerSnap.Hostname
 	}
 	sources = append(sources, "Host /proc")
 
-	// Resolve WUD and Beszel URLs (explicit ENV > Docker auto-discovery)
 	wudURL := lc.cfg.WUDURL
 	if wudURL == "" {
 		wudURL = dockerSnap.DiscoveredWUD
@@ -1662,7 +1850,6 @@ func (lc *LiveCollector) refresh() {
 		beszelEmbed = beszelURL
 	}
 
-	// 3. Parallel collection: Uptime Kuma, Beszel, WUD, Prometheus, Services, Hosts, SSL
 	var (
 		kumaSnap   KumaSnapshot
 		beszelSnap BeszelSnapshot
@@ -1671,16 +1858,6 @@ func (lc *LiveCollector) refresh() {
 		promUp     float64
 		promAll    float64
 	)
-
-	critResults := make([]ServiceStatus, len(lc.cfg.CriticalServices))
-	extraResults := make([]ServiceStatus, len(lc.cfg.ExtraServices))
-	type hostRes struct {
-		name   string
-		online bool
-		detail string
-	}
-	hostResults := make([]hostRes, len(lc.cfg.Hosts))
-	sslResults := make([]SSLCheckResult, len(lc.cfg.SSLDomains))
 
 	var preWg sync.WaitGroup
 	preWg.Add(4)
@@ -1721,6 +1898,16 @@ func (lc *LiveCollector) refresh() {
 		sources = append(sources, "Prometheus")
 	}
 
+	critResults := make([]ServiceStatus, len(lc.cfg.CriticalServices))
+	extraResults := make([]ServiceStatus, len(lc.cfg.ExtraServices))
+	type hostRes struct {
+		name   string
+		online bool
+		detail string
+	}
+	hostResults := make([]hostRes, len(lc.cfg.Hosts))
+	sslResults := make([]SSLCheckResult, len(lc.cfg.SSLDomains))
+
 	var wg sync.WaitGroup
 	for i, sdef := range lc.cfg.CriticalServices {
 		wg.Add(1)
@@ -1757,24 +1944,61 @@ func (lc *LiveCollector) refresh() {
 		sources = append(sources, "Live TLS")
 	}
 
-	// ─── ZEILE 1: EXECUTIVE SUMMARY ───
+	// Build public Kuma list
+	kumaPub := KumaPublicSnapshot{
+		Available: kumaSnap.Available,
+		Reachable: kumaSnap.Reachable,
+		Online:    kumaSnap.Online,
+		Total:     kumaSnap.Total,
+		Monitors:  []KumaPublicMonitor{},
+	}
+	for _, m := range kumaSnap.Monitors {
+		kumaPub.Monitors = append(kumaPub.Monitors, KumaPublicMonitor{
+			Name:      m.Name,
+			Online:    m.Status == 1,
+			LatencyMs: math.Round(m.LatencyMs),
+			CertDays:  int(m.CertDays),
+		})
+	}
+	sort.Slice(kumaPub.Monitors, func(i, j int) bool {
+		if kumaPub.Monitors[i].Online != kumaPub.Monitors[j].Online {
+			return !kumaPub.Monitors[i].Online
+		}
+		return kumaPub.Monitors[i].Name < kumaPub.Monitors[j].Name
+	})
+
+	// ─── ZEILE 1: EXECUTIVE SUMMARY (WITH EXPANDABLE DETAILS!) ───
 	svcOnline, svcTotal := 0, 0
 	svcSource := "Live-Probe"
+	svcDetails := make([]string, 0)
 	if kumaSnap.Available {
 		svcOnline = kumaSnap.Online
 		svcTotal = kumaSnap.Total
 		svcSource = "Uptime Kuma"
+		for _, m := range kumaPub.Monitors {
+			stTxt := "ONLINE"
+			if !m.Online {
+				stTxt = "OFFLINE"
+			}
+			svcDetails = append(svcDetails, fmt.Sprintf("%s: %s (%.0f ms)", m.Name, stTxt, m.LatencyMs))
+		}
 	} else {
 		for _, s := range critResults {
 			svcTotal++
 			if s.Online {
 				svcOnline++
+				svcDetails = append(svcDetails, fmt.Sprintf("✓ %s (%s)", s.Name, s.Latency))
+			} else {
+				svcDetails = append(svcDetails, fmt.Sprintf("✕ %s (%s)", s.Name, s.Latency))
 			}
 		}
 		for _, s := range extraResults {
 			svcTotal++
 			if s.Online {
 				svcOnline++
+				svcDetails = append(svcDetails, fmt.Sprintf("✓ %s (%s)", s.Name, s.Latency))
+			} else {
+				svcDetails = append(svcDetails, fmt.Sprintf("✕ %s (%s)", s.Name, s.Latency))
 			}
 		}
 	}
@@ -1788,22 +2012,24 @@ func (lc *LiveCollector) refresh() {
 		svcSub = fmt.Sprintf("%d Dienst(e) OFFLINE", svcTotal-svcOnline)
 	}
 
-	// Hosts online: Beszel > Prometheus > Host-Check
 	hostsOnline, hostsTotal := 0, 0
 	hostSource := "Host-Check"
+	hostDetails := make([]string, 0)
 	if beszelSnap.Available {
 		hostsOnline = beszelSnap.Online
 		hostsTotal = beszelSnap.Total
 		hostSource = "Beszel"
 		for _, h := range beszelSnap.Hosts {
+			hostDetails = append(hostDetails, fmt.Sprintf("%s (%s): CPU %.0f%% · RAM %.0f%% · Disk %.0f%%", h.Name, strings.ToUpper(h.Status), h.CPU, h.Mem, h.Disk))
 			if h.Status != "up" {
 				incidents = append(incidents, IncidentItem{
-					Level: "crit",
-					Badge: "KRITISCH",
-					Title: fmt.Sprintf("Host offline · %s", h.Name),
-					Meta:  fmt.Sprintf("Beszel · Status: %s (%s)", h.Status, h.Host),
-					Time:  "AKTIV",
-					Rank:  1,
+					Level:  "crit",
+					Badge:  "KRITISCH",
+					Title:  fmt.Sprintf("Host offline · %s", h.Name),
+					Meta:   fmt.Sprintf("Beszel · Status: %s (%s)", h.Status, h.Host),
+					Detail: "Beszel meldet keinen aktiven Agent-Heartbeat. Erreichbarkeit und Stromversorgung prüfen.",
+					Time:   "AKTIV",
+					Rank:   1,
 				})
 			}
 		}
@@ -1811,34 +2037,38 @@ func (lc *LiveCollector) refresh() {
 		hostsOnline = int(promUp)
 		hostsTotal = int(promAll)
 		hostSource = "Prometheus"
+		hostDetails = append(hostDetails, fmt.Sprintf("Prometheus Targets up: %d / %d", hostsOnline, hostsTotal))
 	} else {
 		for _, h := range hostResults {
 			hostsTotal++
 			if h.online {
 				hostsOnline++
+				hostDetails = append(hostDetails, fmt.Sprintf("✓ %s (%s · Uptime %s)", h.name, h.detail, sys.uptimeStr))
 			} else {
+				hostDetails = append(hostDetails, fmt.Sprintf("✕ %s (%s)", h.name, h.detail))
 				incidents = append(incidents, IncidentItem{
-					Level: "crit",
-					Badge: "KRITISCH",
-					Title: fmt.Sprintf("Host offline · %s", h.name),
-					Meta:  fmt.Sprintf("Host-Check · %s", h.detail),
-					Time:  "AKTIV",
-					Rank:  1,
+					Level:  "crit",
+					Badge:  "KRITISCH",
+					Title:  fmt.Sprintf("Host offline · %s", h.name),
+					Meta:   fmt.Sprintf("Host-Check · %s", h.detail),
+					Detail: "Host antwortet nicht auf den Live-Netzwerkcheck.",
+					Time:   "AKTIV",
+					Rank:   1,
 				})
 			}
 		}
 	}
 	hostStatus := "ok"
-	hostSub := fmt.Sprintf("%s · Uptime %s", hostName, uptimeStr)
+	hostSub := fmt.Sprintf("%s · Uptime %s", hostName, sys.uptimeStr)
 	if hostsOnline < hostsTotal {
 		hostStatus = "crit"
 		hostSub = fmt.Sprintf("%d Host(s) nicht erreichbar", hostsTotal-hostsOnline)
 	}
 
-	// Container healthy
 	cntValue := "n/a"
 	cntStatus := "warn"
 	cntSub := "Docker Socket (/var/run/docker.sock) nicht gemountet"
+	cntDetails := make([]string, 0)
 	if dockerSnap.Available {
 		cntValue = fmt.Sprintf("%d / %d", dockerSnap.Healthy, dockerSnap.Total)
 		if dockerSnap.Unhealthy > 0 {
@@ -1848,13 +2078,21 @@ func (lc *LiveCollector) refresh() {
 			cntStatus = "ok"
 			cntSub = fmt.Sprintf("%d laufende Container · 0 unhealthy", dockerSnap.Healthy)
 		}
+		cntDetails = append(cntDetails,
+			fmt.Sprintf("Healthy / Laufend: %d", dockerSnap.Healthy),
+			fmt.Sprintf("Unhealthy / Fehler: %d", dockerSnap.Unhealthy),
+			fmt.Sprintf("Neustarts gesamt: %d", dockerSnap.Restarts),
+		)
+		if wudSnap.Available {
+			cntDetails = append(cntDetails, fmt.Sprintf("WUD Updates verfügbar: %d / %d", wudSnap.UpdatesAvailable, wudSnap.TotalWatched))
+		}
 	}
 
-	// SSL-Zertifikate
 	sslValue := "OK"
 	sslStatus := "ok"
 	sslSource := "Live TLS"
 	sslSub := "Keine SSL-Domains konfiguriert"
+	sslDetails := make([]string, 0)
 	minSSL := 9999
 	minSSLDom := ""
 	sslFailed := ""
@@ -1867,9 +2105,13 @@ func (lc *LiveCollector) refresh() {
 	for _, r := range sslResults {
 		if !r.Valid {
 			sslFailed = r.Domain
-		} else if r.DaysLeft < minSSL {
-			minSSL = r.DaysLeft
-			minSSLDom = r.Domain
+			sslDetails = append(sslDetails, fmt.Sprintf("✕ %s: %s", r.Domain, r.ErrText))
+		} else {
+			sslDetails = append(sslDetails, fmt.Sprintf("✓ %s: noch %d Tage (bis %s · %s)", r.Domain, r.DaysLeft, r.NotAfter, r.Issuer))
+			if r.DaysLeft < minSSL {
+				minSSL = r.DaysLeft
+				minSSLDom = r.Domain
+			}
 		}
 	}
 
@@ -1878,12 +2120,13 @@ func (lc *LiveCollector) refresh() {
 		sslStatus = "crit"
 		sslSub = fmt.Sprintf("TLS-Fehler bei %s", sslFailed)
 		incidents = append(incidents, IncidentItem{
-			Level: "crit",
-			Badge: "KRITISCH",
-			Title: fmt.Sprintf("SSL/TLS-Prüfung fehlgeschlagen · %s", sslFailed),
-			Meta:  "Live TLS · Zertifikat ungültig oder Port 443 nicht erreichbar",
-			Time:  "AKTIV",
-			Rank:  2,
+			Level:  "crit",
+			Badge:  "KRITISCH",
+			Title:  fmt.Sprintf("SSL/TLS-Prüfung fehlgeschlagen · %s", sslFailed),
+			Meta:   "Live TLS · Port 443 oder Zertifikat fehlerhaft",
+			Detail: "Prüfe Nginx Proxy Manager SSL-Zertifikate und Cloudflare DNS/Proxy-Einstellungen.",
+			Time:   "AKTIV",
+			Rank:   2,
 		})
 	} else if minSSL < 9999 {
 		sslSub = fmt.Sprintf("Min. %d Tage · %s", minSSL, minSSLDom)
@@ -1891,23 +2134,25 @@ func (lc *LiveCollector) refresh() {
 			sslValue = fmt.Sprintf("%d TAGE", minSSL)
 			sslStatus = "crit"
 			incidents = append(incidents, IncidentItem{
-				Level: "crit",
-				Badge: "KRITISCH",
-				Title: fmt.Sprintf("SSL läuft in %d Tagen ab · %s", minSSL, minSSLDom),
-				Meta:  sslSource + " · Sofortige Erneuerung erforderlich",
-				Time:  fmt.Sprintf("%dd Rest", minSSL),
-				Rank:  2,
+				Level:  "crit",
+				Badge:  "KRITISCH",
+				Title:  fmt.Sprintf("SSL läuft in %d Tagen ab · %s", minSSL, minSSLDom),
+				Meta:   sslSource + " · Sofortige Erneuerung erforderlich",
+				Detail: "Zertifikat im Nginx Proxy Manager manuell erneuern und Let's Encrypt Logs prüfen.",
+				Time:   fmt.Sprintf("%dd Rest", minSSL),
+				Rank:   2,
 			})
 		} else if minSSL <= 21 {
 			sslValue = fmt.Sprintf("%d TAGE", minSSL)
 			sslStatus = "warn"
 			incidents = append(incidents, IncidentItem{
-				Level: "warn",
-				Badge: "WARNUNG",
-				Title: fmt.Sprintf("SSL läuft in %d Tagen ab · %s", minSSL, minSSLDom),
-				Meta:  sslSource + " · Let's Encrypt Auto-Renewal prüfen",
-				Time:  fmt.Sprintf("%dd Rest", minSSL),
-				Rank:  5,
+				Level:  "warn",
+				Badge:  "WARNUNG",
+				Title:  fmt.Sprintf("SSL läuft in %d Tagen ab · %s", minSSL, minSSLDom),
+				Meta:   sslSource + " · Auto-Renewal beobachten",
+				Detail: "Zertifikat befindet sich im Erneuerungsfenster von Let's Encrypt.",
+				Time:   fmt.Sprintf("%dd Rest", minSSL),
+				Rank:   5,
 			})
 		}
 	}
@@ -1918,56 +2163,59 @@ func (lc *LiveCollector) refresh() {
 		if !s.Online {
 			critOffCount++
 			incidents = append(incidents, IncidentItem{
-				Level: "crit",
-				Badge: "KRITISCH",
-				Title: fmt.Sprintf("%s OFFLINE (%s)", s.Name, s.Latency),
-				Meta:  fmt.Sprintf("Ziel: %s · %s", s.Target, s.Error),
-				Time:  "AKTIV",
-				Rank:  1,
+				Level:  "crit",
+				Badge:  "KRITISCH",
+				Title:  fmt.Sprintf("%s OFFLINE (%s)", s.Name, s.Latency),
+				Meta:   fmt.Sprintf("Ziel: %s · %s", s.Target, s.Error),
+				Detail: fmt.Sprintf("Container-Status: %s. Prüfe Logs in Dozzle oder Portainer.", nonEmpty(s.ContainerStatus, "nicht zugeordnet")),
+				Time:   "AKTIV",
+				Rank:   1,
 			})
 		}
 	}
 
-	// ─── INFRASTRUCTURE GAUGES ───
-	cpuSt, cpuTag := thresholdState(cpu, 70, 85)
-	ramSt, ramTag := thresholdState(ramPct, 75, 90)
-	diskSt, diskTag := thresholdState(diskPct, 80, 90)
+	// ─── INFRASTRUCTURE GAUGES (WITH EXPANDABLE TECHNICAL DETAILS) ───
+	cpuSt, cpuTag := thresholdState(sys.cpuPct, 70, 85)
+	ramSt, ramTag := thresholdState(sys.mem.pct, 75, 90)
+	diskSt, diskTag := thresholdState(sys.disk.pct, 80, 90)
 
 	if cpuSt == "crit" {
-		incidents = append(incidents, IncidentItem{Level: "crit", Badge: "KRITISCH", Title: fmt.Sprintf("CPU-Last kritisch (%.0f %%)", cpu), Meta: fmt.Sprintf("Host %s · Load %s · Schwelle > 85 %%", hostName, load1), Time: "AKTIV", Rank: 2})
+		incidents = append(incidents, IncidentItem{Level: "crit", Badge: "KRITISCH", Title: fmt.Sprintf("CPU-Last kritisch (%.0f %%)", sys.cpuPct), Meta: fmt.Sprintf("Host %s · Load %s", hostName, sys.load1), Detail: fmt.Sprintf("Load Average: %s / %s / %s auf %d vCPUs.", sys.load1, sys.load5, sys.load15, sys.cores), Time: "AKTIV", Rank: 2})
 	} else if cpuSt == "warn" {
-		incidents = append(incidents, IncidentItem{Level: "warn", Badge: "WARNUNG", Title: fmt.Sprintf("CPU-Last erhöht (%.0f %%)", cpu), Meta: fmt.Sprintf("Host %s · Load %s · Bereich 70–85 %%", hostName, load1), Time: "AKTIV", Rank: 4})
+		incidents = append(incidents, IncidentItem{Level: "warn", Badge: "WARNUNG", Title: fmt.Sprintf("CPU-Last erhöht (%.0f %%)", sys.cpuPct), Meta: fmt.Sprintf("Host %s · Load %s", hostName, sys.load1), Detail: fmt.Sprintf("Load Average: %s / %s / %s auf %d vCPUs.", sys.load1, sys.load5, sys.load15, sys.cores), Time: "AKTIV", Rank: 4})
 	}
 	if ramSt == "crit" {
-		incidents = append(incidents, IncidentItem{Level: "crit", Badge: "KRITISCH", Title: fmt.Sprintf("Arbeitsspeicher kritisch (%.0f %%)", ramPct), Meta: ramDetail + " · Schwelle > 90 %", Time: "AKTIV", Rank: 2})
+		incidents = append(incidents, IncidentItem{Level: "crit", Badge: "KRITISCH", Title: fmt.Sprintf("Arbeitsspeicher kritisch (%.0f %%)", sys.mem.pct), Meta: fmt.Sprintf("%.1f / %.1f GB belegt", sys.mem.usedGB, sys.mem.totalGB), Detail: fmt.Sprintf("Verfügbar: %.1f GB · Buffers/Cache: %.1f GB.", sys.mem.availGB, sys.mem.cachedGB), Time: "AKTIV", Rank: 2})
 	} else if ramSt == "warn" {
-		incidents = append(incidents, IncidentItem{Level: "warn", Badge: "WARNUNG", Title: fmt.Sprintf("Arbeitsspeicher erhöht (%.0f %%)", ramPct), Meta: ramDetail + " · Bereich 75–90 %", Time: "AKTIV", Rank: 4})
+		incidents = append(incidents, IncidentItem{Level: "warn", Badge: "WARNUNG", Title: fmt.Sprintf("Arbeitsspeicher erhöht (%.0f %%)", sys.mem.pct), Meta: fmt.Sprintf("%.1f / %.1f GB belegt", sys.mem.usedGB, sys.mem.totalGB), Detail: fmt.Sprintf("Verfügbar: %.1f GB · Buffers/Cache: %.1f GB.", sys.mem.availGB, sys.mem.cachedGB), Time: "AKTIV", Rank: 4})
 	}
 	if diskSt == "crit" {
-		incidents = append(incidents, IncidentItem{Level: "crit", Badge: "KRITISCH", Title: fmt.Sprintf("Datenträger kritisch voll (%.0f %%)", diskPct), Meta: diskDetail + " · Schwelle > 90 %", Time: "AKTIV", Rank: 2})
+		incidents = append(incidents, IncidentItem{Level: "crit", Badge: "KRITISCH", Title: fmt.Sprintf("Datenträger kritisch voll (%.0f %%)", sys.disk.pct), Meta: fmt.Sprintf("%.0f / %.0f GB belegt", sys.disk.usedGB, sys.disk.totalGB), Detail: fmt.Sprintf("Nur noch %.1f GB frei auf %s. Docker Images (`docker system prune`) oder Immich/Backup-Storage prüfen.", sys.disk.freeGB, sys.disk.mount), Time: "AKTIV", Rank: 2})
 	} else if diskSt == "warn" {
-		incidents = append(incidents, IncidentItem{Level: "warn", Badge: "WARNUNG", Title: fmt.Sprintf("Datenträger über Warnschwelle (%.0f %%)", diskPct), Meta: diskDetail + " · Bereich 80–90 %", Time: "AKTIV", Rank: 4})
+		incidents = append(incidents, IncidentItem{Level: "warn", Badge: "WARNUNG", Title: fmt.Sprintf("Datenträger über Warnschwelle (%.0f %%)", sys.disk.pct), Meta: fmt.Sprintf("%.0f / %.0f GB belegt", sys.disk.usedGB, sys.disk.totalGB), Detail: fmt.Sprintf("Freier Speicher: %.1f GB auf %s.", sys.disk.freeGB, sys.disk.mount), Time: "AKTIV", Rank: 4})
 	}
 
 	// ─── CONTAINER & WUD INCIDENTS ───
 	for _, uname := range dockerSnap.UnhealthyNames {
 		incidents = append(incidents, IncidentItem{
-			Level: "crit",
-			Badge: "KRITISCH",
-			Title: fmt.Sprintf("Container unhealthy: %s", uname),
-			Meta:  "Docker Engine · Healthcheck fehlgeschlagen oder abgestürzt",
-			Time:  "AKTIV",
-			Rank:  2,
+			Level:  "crit",
+			Badge:  "KRITISCH",
+			Title:  fmt.Sprintf("Container unhealthy: %s", uname),
+			Meta:   "Docker Engine · Healthcheck fehlgeschlagen oder abgestürzt",
+			Detail: "Container im Reiter Live-Telemetrie oder über Dozzle prüfen.",
+			Time:   "AKTIV",
+			Rank:   2,
 		})
 	}
 	for _, r := range dockerSnap.TopRestarts {
 		incidents = append(incidents, IncidentItem{
-			Level: "warn",
-			Badge: "WARNUNG",
-			Title: fmt.Sprintf("%s restart x%d", r.Name, r.Count),
-			Meta:  fmt.Sprintf("Docker Engine · %s", r.Reason),
-			Time:  "Container",
-			Rank:  5,
+			Level:  "warn",
+			Badge:  "WARNUNG",
+			Title:  fmt.Sprintf("%s restart x%d", r.Name, r.Count),
+			Meta:   fmt.Sprintf("Docker Engine · %s", r.Reason),
+			Detail: fmt.Sprintf("Aktueller Zustand: %s. Neustarts über Dozzle-Logs analysieren.", r.State),
+			Time:   "Container",
+			Rank:   5,
 		})
 	}
 	if wudSnap.Available && wudSnap.UpdatesAvailable > 0 {
@@ -1976,54 +2224,58 @@ func (lc *LiveCollector) refresh() {
 			names = append(names, wudSnap.Updates[i].Container)
 		}
 		incidents = append(incidents, IncidentItem{
-			Level: "warn",
-			Badge: "UPDATE",
-			Title: fmt.Sprintf("WUD: %d Container-Update(s) verfügbar", wudSnap.UpdatesAvailable),
-			Meta:  fmt.Sprintf("Betroffen: %s · Details im Tab WUD Updates", strings.Join(names, ", ")),
-			Time:  "WUD",
-			Rank:  6,
+			Level:  "warn",
+			Badge:  "UPDATE",
+			Title:  fmt.Sprintf("WUD: %d Container-Update(s) verfügbar", wudSnap.UpdatesAvailable),
+			Meta:   fmt.Sprintf("Betroffen: %s", strings.Join(names, ", ")),
+			Detail: "Öffne den Reiter WUD Updates für Version-Diffs und DB-Backup-Hinweise.",
+			Time:   "WUD",
+			Rank:   6,
 		})
 	}
 
-	// Calm operational info items when nominal
 	if len(incidents) < 4 {
 		if minSSL < 9999 && minSSL > 21 {
 			incidents = append(incidents, IncidentItem{
-				Level: "info",
-				Badge: "INFO",
-				Title: fmt.Sprintf("SSL-Zertifikate gültig (noch %d Tage)", minSSL),
-				Meta:  fmt.Sprintf("%s · Kürzeste Laufzeit: %s", sslSource, minSSLDom),
-				Time:  "OK",
-				Rank:  8,
+				Level:  "info",
+				Badge:  "INFO",
+				Title:  fmt.Sprintf("SSL-Zertifikate gültig (noch %d Tage)", minSSL),
+				Meta:   fmt.Sprintf("%s · Kürzeste Laufzeit: %s", sslSource, minSSLDom),
+				Detail: strings.Join(sslDetails, " · "),
+				Time:   "OK",
+				Rank:   8,
 			})
 		}
 		if wudSnap.Available && wudSnap.UpdatesAvailable == 0 {
 			incidents = append(incidents, IncidentItem{
-				Level: "info",
-				Badge: "INFO",
-				Title: fmt.Sprintf("WUD: Alle %d überwachten Container aktuell", wudSnap.TotalWatched),
-				Meta:  "What's Up Docker · Keine ausstehenden Image-Updates",
-				Time:  "AKTUELL",
-				Rank:  8,
+				Level:  "info",
+				Badge:  "INFO",
+				Title:  fmt.Sprintf("WUD: Alle %d überwachten Container aktuell", wudSnap.TotalWatched),
+				Meta:   "What's Up Docker · Keine ausstehenden Image-Updates",
+				Detail: "Letzter Live-Abgleich über WUD API erfolgreich.",
+				Time:   "AKTUELL",
+				Rank:   8,
 			})
 		}
 		if dockerSnap.Available {
 			incidents = append(incidents, IncidentItem{
-				Level: "info",
-				Badge: "INFO",
-				Title: fmt.Sprintf("Docker Engine stabil · %d / %d Container healthy", dockerSnap.Healthy, dockerSnap.Total),
-				Meta:  fmt.Sprintf("Host %s · %d Neustarts registriert", hostName, dockerSnap.Restarts),
-				Time:  "LIVE",
-				Rank:  9,
+				Level:  "info",
+				Badge:  "INFO",
+				Title:  fmt.Sprintf("Docker Engine stabil · %d / %d Container healthy", dockerSnap.Healthy, dockerSnap.Total),
+				Meta:   fmt.Sprintf("Host %s · %d Neustarts registriert", hostName, dockerSnap.Restarts),
+				Detail: "Alle Container-Details und Stacks findest du live im Reiter Live-Telemetrie.",
+				Time:   "LIVE",
+				Rank:   9,
 			})
 		}
 		incidents = append(incidents, IncidentItem{
-			Level: "info",
-			Badge: "INFO",
-			Title: fmt.Sprintf("Host %s online · Uptime %s", hostName, uptimeStr),
-			Meta:  fmt.Sprintf("Aktive Quellen: %s", strings.Join(sources, " · ")),
-			Time:  "SYNC",
-			Rank:  10,
+			Level:  "info",
+			Badge:  "INFO",
+			Title:  fmt.Sprintf("Host %s online · Uptime %s", hostName, sys.uptimeStr),
+			Meta:   fmt.Sprintf("Aktive Quellen: %s", strings.Join(sources, " · ")),
+			Detail: fmt.Sprintf("Load Average: %s / %s / %s · RAM %.1f/%.1f GB · RX %.2f GB / TX %.2f GB.", sys.load1, sys.load5, sys.load15, sys.mem.usedGB, sys.mem.totalGB, sys.net.RxTotalGB, sys.net.TxTotalGB),
+			Time:   "SYNC",
+			Rank:   10,
 		})
 	}
 
@@ -2035,28 +2287,24 @@ func (lc *LiveCollector) refresh() {
 	}
 
 	// ─── GLOBAL EXECUTIVE VERDICT ───
-	verdict := VerdictInfo{
-		Level: "ok",
-		Text:  "ALLE SYSTEME NOMINAL · KEIN EINGRIFF ERFORDERLICH",
-	}
+	verdict := VerdictInfo{Level: "ok", Text: "ALLE SYSTEME NOMINAL · KEIN EINGRIFF ERFORDERLICH"}
 	hasCrit := critOffCount > 0 || svcStatus == "crit" || hostStatus == "crit" || cntStatus == "crit" || sslStatus == "crit" || cpuSt == "crit" || ramSt == "crit" || diskSt == "crit"
 	hasWarn := svcStatus == "warn" || hostStatus == "warn" || sslStatus == "warn" || cpuSt == "warn" || ramSt == "warn" || diskSt == "warn" || dockerSnap.Restarts > 0
 
 	if hasCrit {
-		verdict = VerdictInfo{
-			Level: "crit",
-			Text:  "EINGRIFF ERFORDERLICH · KRITISCHE STÖRUNG ERKANNT",
-		}
+		verdict = VerdictInfo{Level: "crit", Text: "EINGRIFF ERFORDERLICH · KRITISCHE STÖRUNG ERKANNT"}
 		if critOffCount > 0 {
 			verdict.Text = fmt.Sprintf("EINGRIFF ERFORDERLICH · %d KRITISCHER DIENST OFFLINE", critOffCount)
 		} else if dockerSnap.Unhealthy > 0 {
 			verdict.Text = fmt.Sprintf("EINGRIFF ERFORDERLICH · %d CONTAINER UNHEALTHY", dockerSnap.Unhealthy)
 		}
 	} else if hasWarn {
-		verdict = VerdictInfo{
-			Level: "warn",
-			Text:  "WARNUNG AKTIV · RESSOURCEN / RESTARTS / SSL PRÜFEN",
-		}
+		verdict = VerdictInfo{Level: "warn", Text: "WARNUNG AKTIV · RESSOURCEN / RESTARTS / SSL PRÜFEN"}
+	}
+
+	diskDetailStr := fmt.Sprintf("%.0f / %.0f GB", sys.disk.usedGB, sys.disk.totalGB)
+	if sys.disk.totalGB >= 1000 {
+		diskDetailStr = fmt.Sprintf("%.0f GB / %.2f TB", sys.disk.usedGB, sys.disk.totalGB/1024.0)
 	}
 
 	payload := DashboardPayload{
@@ -2065,24 +2313,38 @@ func (lc *LiveCollector) refresh() {
 		PollIntervalSec: int(lc.cfg.PollInterval.Seconds()),
 		Hostname:        hostName,
 		HostIP:          lc.cfg.HostIP,
-		UptimeHuman:     uptimeStr,
+		UptimeHuman:     sys.uptimeStr,
 		Sources:         sources,
 		Verdict:         verdict,
 		ExecutiveSummary: []ExecStat{
-			{ID: "services-online", Label: "Dienste online", Value: fmt.Sprintf("%d / %d", svcOnline, svcTotal), Source: svcSource, Status: svcStatus, Sub: svcSub},
-			{ID: "hosts-online", Label: "Hosts online", Value: fmt.Sprintf("%d / %d", hostsOnline, hostsTotal), Source: hostSource, Status: hostStatus, Sub: hostSub},
-			{ID: "containers-healthy", Label: "Container healthy", Value: cntValue, Source: "Docker Engine", Status: cntStatus, Sub: cntSub},
-			{ID: "ssl-status", Label: "SSL-Zertifikate", Value: sslValue, Source: sslSource, Status: sslStatus, Sub: sslSub},
+			{ID: "services-online", Label: "Dienste online", Value: fmt.Sprintf("%d / %d", svcOnline, svcTotal), Source: svcSource, Status: svcStatus, Sub: svcSub, Details: svcDetails},
+			{ID: "hosts-online", Label: "Hosts online", Value: fmt.Sprintf("%d / %d", hostsOnline, hostsTotal), Source: hostSource, Status: hostStatus, Sub: hostSub, Details: hostDetails},
+			{ID: "containers-healthy", Label: "Container healthy", Value: cntValue, Source: "Docker Engine", Status: cntStatus, Sub: cntSub, Details: cntDetails},
+			{ID: "ssl-status", Label: "SSL-Zertifikate", Value: sslValue, Source: sslSource, Status: sslStatus, Sub: sslSub, Details: sslDetails},
 		},
 		CriticalServices: critResults,
 		Infrastructure: InfraStatus{
-			Source: fmt.Sprintf("Live /proc · Host %s", hostName),
+			Source:     fmt.Sprintf("Live /proc · Host %s", hostName),
+			CPUHistory: sys.cpuHistory,
+			RAMHistory: sys.ramHistory,
 			Gauges: []GaugeStatus{
-				{ID: "cpu", Label: "CPU-Last", Value: cpu, Unit: "%", Status: cpuSt, StateTag: cpuTag, Detail: fmt.Sprintf("%d vCPU · Load %s", cores, load1), Threshold: "Grün < 70 % · Gelb 70–85 % · Rot > 85 %"},
-				{ID: "ram", Label: "Arbeitsspeicher", Value: ramPct, Unit: "%", Status: ramSt, StateTag: ramTag, Detail: ramDetail, Threshold: "Grün < 75 % · Gelb 75–90 % · Rot > 90 %"},
-				{ID: "disk", Label: "Datenträger", Value: diskPct, Unit: "%", Status: diskSt, StateTag: diskTag, Detail: diskDetail, Threshold: "Grün < 80 % · Gelb 80–90 % · Rot > 90 %"},
+				{
+					ID: "cpu", Label: "CPU-Last", Value: sys.cpuPct, Unit: "%", Status: cpuSt, StateTag: cpuTag,
+					Detail: fmt.Sprintf("%d vCPU · Load %s", sys.cores, sys.load1), Threshold: "Grün < 70 % · Gelb 70–85 % · Rot > 85 %",
+					Extra: []string{fmt.Sprintf("Load 1m / 5m / 15m: %s · %s · %s", sys.load1, sys.load5, sys.load15), fmt.Sprintf("Kerne: %d vCPUs · Uptime: %s", sys.cores, sys.uptimeStr)},
+				},
+				{
+					ID: "ram", Label: "Arbeitsspeicher", Value: sys.mem.pct, Unit: "%", Status: ramSt, StateTag: ramTag,
+					Detail: fmt.Sprintf("%.1f / %.1f GB belegt", sys.mem.usedGB, sys.mem.totalGB), Threshold: "Grün < 75 % · Gelb 75–90 % · Rot > 90 %",
+					Extra: []string{fmt.Sprintf("Verfügbar: %.1f GB · Belegt: %.1f GB", sys.mem.availGB, sys.mem.usedGB), fmt.Sprintf("Buffers & Page-Cache: %.1f GB", sys.mem.cachedGB)},
+				},
+				{
+					ID: "disk", Label: "Datenträger", Value: sys.disk.pct, Unit: "%", Status: diskSt, StateTag: diskTag,
+					Detail: diskDetailStr, Threshold: "Grün < 80 % · Gelb 80–90 % · Rot > 90 %",
+					Extra: []string{fmt.Sprintf("Frei: %.1f GB · Mountpoint: %s", sys.disk.freeGB, sys.disk.mount), fmt.Sprintf("Belegt: %.1f GB von %.1f GB", sys.disk.usedGB, sys.disk.totalGB)},
+				},
 			},
-			Network: netSt,
+			Network: sys.net,
 		},
 		ContainerHealth: ContainerHealth{
 			Available:   dockerSnap.Available,
@@ -2093,16 +2355,22 @@ func (lc *LiveCollector) refresh() {
 			Restarts:    dockerSnap.Restarts,
 			TopRestarts: dockerSnap.TopRestarts,
 		},
-		WUD:    wudSnap,
-		Beszel: beszelSnap,
+		Containers: dockerSnap.Containers,
+		SSLCerts:   sslResults,
+		WUD:        wudSnap,
+		Beszel:     beszelSnap,
+		Kuma:       kumaPub,
 		Embeds: EmbedConfig{
-			BeszelURL:    beszelEmbed,
-			BeszelOnline: beszelSnap.Reachable,
-			KumaURL:      lc.cfg.UptimeKumaEmbed,
-			KumaOnline:   kumaSnap.Reachable,
-			WUDURL:       wudURL,
-			WUDOnline:    wudSnap.Available,
-			DozzleURL:    lc.cfg.DozzleURL,
+			BeszelURL:      beszelEmbed,
+			BeszelFrameURL: computeFrameURL(beszelEmbed, lc.cfg.EnableEmbedProxy),
+			BeszelOnline:   beszelSnap.Reachable,
+			KumaURL:        lc.cfg.UptimeKumaEmbed,
+			KumaFrameURL:   computeFrameURL(lc.cfg.UptimeKumaEmbed, lc.cfg.EnableEmbedProxy),
+			KumaOnline:     kumaSnap.Reachable,
+			ProxyEnabled:   lc.cfg.EnableEmbedProxy,
+			WUDURL:         wudURL,
+			WUDOnline:      wudSnap.Available,
+			DozzleURL:      lc.cfg.DozzleURL,
 		},
 		Incidents: incidents,
 	}
@@ -2110,6 +2378,21 @@ func (lc *LiveCollector) refresh() {
 	lc.mu.Lock()
 	lc.latest = payload
 	lc.mu.Unlock()
+}
+
+func computeFrameURL(directURL string, proxyEnabled bool) string {
+	if !proxyEnabled || directURL == "" {
+		return directURL
+	}
+	u, err := url.Parse(directURL)
+	if err != nil || u.Path == "" || u.Path == "/" {
+		return directURL
+	}
+	p := u.Path
+	if u.RawQuery != "" {
+		p += "?" + u.RawQuery
+	}
+	return p
 }
 
 func thresholdState(val, warn, crit float64) (string, string) {
@@ -2143,6 +2426,13 @@ func slugify(s string) string {
 	return strings.Trim(b.String(), "-")
 }
 
+func nonEmpty(s, fallback string) string {
+	if strings.TrimSpace(s) != "" {
+		return s
+	}
+	return fallback
+}
+
 func minInt(a, b int) int {
 	if a < b {
 		return a
@@ -2157,7 +2447,124 @@ func maxInt(a, b int) int {
 	return b
 }
 
-// ─── HTTP SERVER ───
+// ─── SAME-ORIGIN EMBED REVERSE PROXY (BESZEL & UPTIME KUMA) ───
+// Strips X-Frame-Options & CSP frame-ancestors so Beszel (:8099) & Kuma (:3001)
+// render cleanly inside the dashboard tabs without browser cross-origin blocks.
+
+func newEmbedProxy(name, rawTarget string) (*httputil.ReverseProxy, *url.URL) {
+	if rawTarget == "" {
+		return nil, nil
+	}
+	target, err := url.Parse(rawTarget)
+	if err != nil || target.Host == "" {
+		return nil, nil
+	}
+	originStr := target.Scheme + "://" + target.Host
+	transport := &http.Transport{
+		Proxy:           nil,
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		MaxIdleConns:          64,
+		IdleConnTimeout:       60 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	proxy := &httputil.ReverseProxy{
+		Transport:     transport,
+		FlushInterval: -1, // Instant flush for PocketBase SSE (/api/realtime) & Socket.IO
+		Director: func(req *http.Request) {
+			req.URL.Scheme = target.Scheme
+			req.URL.Host = target.Host
+			req.Host = target.Host
+			if req.Header.Get("Origin") != "" {
+				req.Header.Set("Origin", originStr)
+			}
+			if ref := req.Header.Get("Referer"); ref != "" {
+				if ru, err := url.Parse(ref); err == nil {
+					ru.Scheme = target.Scheme
+					ru.Host = target.Host
+					req.Header.Set("Referer", ru.String())
+				}
+			}
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			resp.Header.Del("X-Frame-Options")
+			resp.Header.Del("Content-Security-Policy")
+			resp.Header.Del("Content-Security-Policy-Report-Only")
+			if loc := resp.Header.Get("Location"); loc != "" && strings.HasPrefix(loc, originStr) {
+				rel := strings.TrimPrefix(loc, originStr)
+				if rel != "" && rel != "/" {
+					resp.Header.Set("Location", rel)
+				}
+			}
+			return nil
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html lang="de"><head><meta charset="utf-8"><style>body{margin:0;padding:24px;font-family:system-ui,sans-serif;background:#121826;color:#f6f5f1}h3{margin:0 0 8px;color:#f87171}code{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:5px}a{color:#38bdf8}</style></head><body><h3>%s aktuell nicht erreichbar</h3><p>Ziel: <code>%s</code> (%s)</p><p><a href="%s" target="_blank" rel="noopener">Direkt in neuem Tab öffnen ↗</a></p></body></html>`,
+				name, originStr, err.Error(), rawTarget)
+		},
+	}
+	return proxy, target
+}
+
+func probeUpstreamExists(client *http.Client, base *url.URL, reqPath string) bool {
+	if base == nil {
+		return false
+	}
+	u := base.Scheme + "://" + base.Host + reqPath
+	req, err := http.NewRequest(http.MethodHead, u, nil)
+	if err != nil {
+		return false
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusMethodNotAllowed {
+		req2, err2 := http.NewRequest(http.MethodGet, u, nil)
+		if err2 != nil {
+			return false
+		}
+		resp2, err2 := client.Do(req2)
+		if err2 != nil {
+			return false
+		}
+		_, _ = io.CopyN(io.Discard, resp2.Body, 64)
+		resp2.Body.Close()
+		return resp2.StatusCode >= 200 && resp2.StatusCode < 400
+	}
+	return resp.StatusCode >= 200 && resp.StatusCode < 400
+}
+
+func isKumaPath(p string) bool {
+	return p == "/status" ||
+		strings.HasPrefix(p, "/status/") ||
+		strings.HasPrefix(p, "/api/status-page/") ||
+		strings.HasPrefix(p, "/api/badge/") ||
+		strings.HasPrefix(p, "/api/entry-page") ||
+		strings.HasPrefix(p, "/upload/") ||
+		strings.HasPrefix(p, "/socket.io/") ||
+		p == "/icon.svg" ||
+		p == "/apple-touch-icon.png"
+}
+
+func isBeszelPath(p string) bool {
+	return p == "/system" ||
+		strings.HasPrefix(p, "/system/") ||
+		p == "/settings" ||
+		strings.HasPrefix(p, "/settings/") ||
+		strings.HasPrefix(p, "/api/") ||
+		strings.HasPrefix(p, "/static/") ||
+		strings.HasPrefix(p, "/_/")
+}
+
+// ─── HTTP SERVER (SERVES EMBEDDED WEB UI DIRECTLY FROM RAM + SAME-ORIGIN EMBED PROXY) ───
 
 func main() {
 	cfg := loadConfig()
@@ -2166,6 +2573,24 @@ func main() {
 
 	collector := NewLiveCollector(cfg)
 	collector.Start(ctx)
+
+	webSub, err := fs.Sub(embeddedWeb, "web")
+	if err != nil {
+		log.Fatalf("embed fs error: %v", err)
+	}
+	fileServer := http.FileServer(http.FS(webSub))
+
+	var beszelProxy, kumaProxy *httputil.ReverseProxy
+	var beszelTarget, kumaTarget *url.URL
+	if cfg.EnableEmbedProxy {
+		beszelProxy, beszelTarget = newEmbedProxy("Beszel", cfg.BeszelURL)
+		kumaProxy, kumaTarget = newEmbedProxy("Uptime Kuma", cfg.UptimeKumaURL)
+	}
+	probeClient := &http.Client{
+		Timeout:   2 * time.Second,
+		Transport: &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
+	}
+	var assetOwner sync.Map // map[path]string ("kuma" | "beszel")
 
 	mux := http.NewServeMux()
 
@@ -2178,20 +2603,97 @@ func main() {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 		payload := collector.Latest()
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(payload)
+		_ = json.NewEncoder(w).Encode(payload)
 	})
 
-	fileServer := http.FileServer(http.Dir(cfg.PublicDir))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/fonts/") {
-			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		} else if strings.HasPrefix(r.URL.Path, "/css/") || strings.HasPrefix(r.URL.Path, "/js/") {
-			w.Header().Set("Cache-Control", "public, max-age=300")
-		} else {
+		p := r.URL.Path
+
+		// 1. Root NOC Dashboard
+		if p == "/" || p == "/index.html" {
 			w.Header().Set("Cache-Control", "no-cache")
+			fileServer.ServeHTTP(w, r)
+			return
 		}
-		fileServer.ServeHTTP(w, r)
+
+		// 2. Embedded static assets (CSS, JS, self-hosted WOFF2 fonts, favicon)
+		cleanRel := strings.TrimPrefix(filepath.Clean(p), "/")
+		if cleanRel != "" && !strings.HasPrefix(cleanRel, "..") {
+			if info, err := fs.Stat(webSub, cleanRel); err == nil && !info.IsDir() {
+				if strings.HasPrefix(p, "/fonts/") {
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				} else if strings.HasPrefix(p, "/css/") || strings.HasPrefix(p, "/js/") {
+					w.Header().Set("Cache-Control", "public, max-age=300")
+				} else {
+					w.Header().Set("Cache-Control", "no-cache")
+				}
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		// 3. Same-origin embed reverse proxy for Uptime Kuma & Beszel
+		if cfg.EnableEmbedProxy {
+			if isKumaPath(p) && kumaProxy != nil {
+				kumaProxy.ServeHTTP(w, r)
+				return
+			}
+			if isBeszelPath(p) && beszelProxy != nil {
+				beszelProxy.ServeHTTP(w, r)
+				return
+			}
+
+			// Shared SPA asset / locale / manifest routing (/assets/*, /locales/*, etc.)
+			if owner, ok := assetOwner.Load(p); ok {
+				if owner == "kuma" && kumaProxy != nil {
+					kumaProxy.ServeHTTP(w, r)
+					return
+				}
+				if owner == "beszel" && beszelProxy != nil {
+					beszelProxy.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			// Determine preferred upstream from Referer or cached Referer owner
+			preferKuma := false
+			if ref := r.Header.Get("Referer"); ref != "" {
+				if ru, err := url.Parse(ref); err == nil {
+					if strings.HasPrefix(ru.Path, "/status") {
+						preferKuma = true
+					} else if prevOwner, ok := assetOwner.Load(ru.Path); ok && prevOwner == "kuma" {
+						preferKuma = true
+					}
+				}
+			}
+
+			reqURI := r.URL.RequestURI()
+			if preferKuma {
+				if kumaProxy != nil && probeUpstreamExists(probeClient, kumaTarget, reqURI) {
+					assetOwner.Store(p, "kuma")
+					kumaProxy.ServeHTTP(w, r)
+					return
+				}
+				if beszelProxy != nil && probeUpstreamExists(probeClient, beszelTarget, reqURI) {
+					assetOwner.Store(p, "beszel")
+					beszelProxy.ServeHTTP(w, r)
+					return
+				}
+			} else {
+				if beszelProxy != nil && probeUpstreamExists(probeClient, beszelTarget, reqURI) {
+					assetOwner.Store(p, "beszel")
+					beszelProxy.ServeHTTP(w, r)
+					return
+				}
+				if kumaProxy != nil && probeUpstreamExists(probeClient, kumaTarget, reqURI) {
+					assetOwner.Store(p, "kuma")
+					kumaProxy.ServeHTTP(w, r)
+					return
+				}
+			}
+		}
+
+		http.NotFound(w, r)
 	})
 
 	srv := &http.Server{
@@ -2200,8 +2702,8 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("NOC Live Server listening on %s (public=%s, host=%s, proc=%s, docker=%s)",
-		cfg.ListenAddr, cfg.PublicDir, cfg.HostIP, cfg.ProcDir, cfg.DockerSocket)
+	log.Printf("NOC Live Single-Binary Server listening on %s (host=%s, proc=%s, docker=%s, embedProxy=%v)",
+		cfg.ListenAddr, cfg.HostIP, cfg.ProcDir, cfg.DockerSocket, cfg.EnableEmbedProxy)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("server error: %v", err)
 	}
